@@ -2,9 +2,9 @@
 
 HTTP API 또는 외부 노출 interface의 source of truth를 둔다.
 
-## 권장 파일
+## 기준 파일
 
-- `openapi.yaml`: REST/HTTP API 기준
+- `openapi.yaml`: FastAPI 운영 서버가 제공해야 하는 REST/HTTP API 기준
 - GraphQL을 쓰는 경우 `schema.graphql`
 
 ## 기록 기준

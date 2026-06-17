@@ -1,0 +1,289 @@
+-- goodmoneying M1 DB contract
+-- Source of truth for PostgreSQL schema used by the Upbit Collection Pipeline.
+
+CREATE TABLE instruments (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  exchange TEXT NOT NULL,
+  market_code TEXT NOT NULL,
+  quote_currency TEXT NOT NULL,
+  base_asset TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT instruments_exchange_market_code_uk UNIQUE (exchange, market_code),
+  CONSTRAINT instruments_status_ck CHECK (status IN ('active', 'inactive'))
+);
+
+CREATE TABLE candidate_universe_snapshots (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  source TEXT NOT NULL,
+  exchange TEXT NOT NULL,
+  quote_currency TEXT NOT NULL,
+  ranked_at TIMESTAMPTZ NOT NULL,
+  generated_by TEXT NOT NULL DEFAULT 'system',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT candidate_universe_snapshots_source_ck CHECK (source IN ('UPBIT'))
+);
+
+CREATE TABLE candidate_universe_entries (
+  snapshot_id BIGINT NOT NULL REFERENCES candidate_universe_snapshots(id) ON DELETE CASCADE,
+  instrument_id BIGINT NOT NULL REFERENCES instruments(id),
+  rank INTEGER NOT NULL,
+  acc_trade_price_24h NUMERIC NOT NULL,
+  is_default_selected BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (snapshot_id, instrument_id),
+  CONSTRAINT candidate_universe_entries_rank_uk UNIQUE (snapshot_id, rank),
+  CONSTRAINT candidate_universe_entries_rank_ck CHECK (rank BETWEEN 1 AND 100)
+);
+
+CREATE TABLE collection_targets (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  instrument_id BIGINT NOT NULL REFERENCES instruments(id),
+  status TEXT NOT NULL,
+  activated_at TIMESTAMPTZ,
+  deactivated_at TIMESTAMPTZ,
+  candidate_status TEXT NOT NULL DEFAULT 'in_universe',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT collection_targets_instrument_uk UNIQUE (instrument_id),
+  CONSTRAINT collection_targets_status_ck CHECK (status IN ('active', 'inactive')),
+  CONSTRAINT collection_targets_candidate_status_ck CHECK (candidate_status IN ('in_universe', 'out_of_universe'))
+);
+
+CREATE TABLE collection_target_changes (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  instrument_id BIGINT NOT NULL REFERENCES instruments(id),
+  previous_status TEXT,
+  new_status TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  reason TEXT,
+  changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT collection_target_changes_previous_status_ck CHECK (previous_status IS NULL OR previous_status IN ('active', 'inactive')),
+  CONSTRAINT collection_target_changes_new_status_ck CHECK (new_status IN ('active', 'inactive')),
+  CONSTRAINT collection_target_changes_actor_ck CHECK (actor IN ('system', 'local_user'))
+);
+
+CREATE TABLE collection_settings (
+  key TEXT PRIMARY KEY,
+  value JSONB NOT NULL,
+  updated_by TEXT NOT NULL DEFAULT 'system',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT collection_settings_updated_by_ck CHECK (updated_by IN ('system', 'local_user'))
+);
+
+CREATE TABLE collection_runs (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  run_type TEXT NOT NULL,
+  data_type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  trigger_type TEXT NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ,
+  error_code TEXT,
+  error_message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT collection_runs_run_type_ck CHECK (run_type IN ('candidate_refresh', 'incremental', 'backfill', 'completeness_check')),
+  CONSTRAINT collection_runs_data_type_ck CHECK (data_type IN ('candidate_universe', 'source_candle', 'ticker_snapshot', 'orderbook_summary', 'missing_range')),
+  CONSTRAINT collection_runs_status_ck CHECK (status IN ('running', 'succeeded', 'partial', 'failed', 'cancelled')),
+  CONSTRAINT collection_runs_trigger_type_ck CHECK (trigger_type IN ('schedule', 'manual', 'backfill_job', 'system'))
+);
+
+CREATE TABLE target_collection_results (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  collection_run_id BIGINT NOT NULL REFERENCES collection_runs(id) ON DELETE CASCADE,
+  instrument_id BIGINT REFERENCES instruments(id),
+  data_type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  target_start_at TIMESTAMPTZ,
+  target_end_at TIMESTAMPTZ,
+  latency_ms INTEGER,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  rows_written INTEGER NOT NULL DEFAULT 0,
+  error_code TEXT,
+  error_message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT target_collection_results_data_type_ck CHECK (data_type IN ('source_candle', 'ticker_snapshot', 'orderbook_summary', 'candidate_universe', 'missing_range')),
+  CONSTRAINT target_collection_results_status_ck CHECK (status IN ('succeeded', 'failed', 'delayed', 'no_data', 'skipped')),
+  CONSTRAINT target_collection_results_latency_ck CHECK (latency_ms IS NULL OR latency_ms >= 0),
+  CONSTRAINT target_collection_results_retry_count_ck CHECK (retry_count >= 0),
+  CONSTRAINT target_collection_results_rows_written_ck CHECK (rows_written >= 0)
+);
+
+CREATE TABLE source_candles (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  instrument_id BIGINT NOT NULL REFERENCES instruments(id),
+  source TEXT NOT NULL,
+  candle_unit TEXT NOT NULL,
+  candle_start_at TIMESTAMPTZ NOT NULL,
+  open_price NUMERIC NOT NULL,
+  high_price NUMERIC NOT NULL,
+  low_price NUMERIC NOT NULL,
+  close_price NUMERIC NOT NULL,
+  trade_volume NUMERIC NOT NULL,
+  trade_amount NUMERIC NOT NULL,
+  source_timestamp_at TIMESTAMPTZ,
+  collected_at TIMESTAMPTZ NOT NULL,
+  collection_run_id BIGINT REFERENCES collection_runs(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT source_candles_uk UNIQUE (instrument_id, source, candle_unit, candle_start_at),
+  CONSTRAINT source_candles_source_ck CHECK (source IN ('UPBIT')),
+  CONSTRAINT source_candles_candle_unit_ck CHECK (candle_unit IN ('1m', '1d'))
+);
+
+CREATE TABLE ticker_snapshots (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  instrument_id BIGINT NOT NULL REFERENCES instruments(id),
+  source TEXT NOT NULL,
+  bucket_at TIMESTAMPTZ NOT NULL,
+  trade_price NUMERIC NOT NULL,
+  opening_price NUMERIC,
+  high_price NUMERIC,
+  low_price NUMERIC,
+  prev_closing_price NUMERIC,
+  change_rate NUMERIC,
+  signed_change_rate NUMERIC,
+  acc_trade_price_24h NUMERIC,
+  acc_trade_volume_24h NUMERIC,
+  source_timestamp_at TIMESTAMPTZ,
+  collected_at TIMESTAMPTZ NOT NULL,
+  collection_run_id BIGINT REFERENCES collection_runs(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT ticker_snapshots_uk UNIQUE (instrument_id, source, bucket_at),
+  CONSTRAINT ticker_snapshots_source_ck CHECK (source IN ('UPBIT'))
+);
+
+CREATE TABLE orderbook_summaries (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  instrument_id BIGINT NOT NULL REFERENCES instruments(id),
+  source TEXT NOT NULL,
+  bucket_at TIMESTAMPTZ NOT NULL,
+  best_bid_price NUMERIC NOT NULL,
+  best_bid_size NUMERIC NOT NULL,
+  best_ask_price NUMERIC NOT NULL,
+  best_ask_size NUMERIC NOT NULL,
+  spread NUMERIC NOT NULL,
+  bid_depth_10 NUMERIC NOT NULL,
+  ask_depth_10 NUMERIC NOT NULL,
+  imbalance_10 NUMERIC NOT NULL,
+  source_timestamp_at TIMESTAMPTZ,
+  collected_at TIMESTAMPTZ NOT NULL,
+  collection_run_id BIGINT REFERENCES collection_runs(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT orderbook_summaries_uk UNIQUE (instrument_id, source, bucket_at),
+  CONSTRAINT orderbook_summaries_source_ck CHECK (source IN ('UPBIT'))
+);
+
+CREATE TABLE missing_ranges (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  instrument_id BIGINT NOT NULL REFERENCES instruments(id),
+  data_type TEXT NOT NULL,
+  unit TEXT,
+  range_start_at TIMESTAMPTZ NOT NULL,
+  range_end_at TIMESTAMPTZ NOT NULL,
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL,
+  detected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT missing_ranges_uk UNIQUE (instrument_id, data_type, unit, range_start_at, range_end_at),
+  CONSTRAINT missing_ranges_data_type_ck CHECK (data_type IN ('source_candle', 'ticker_snapshot', 'orderbook_summary')),
+  CONSTRAINT missing_ranges_status_ck CHECK (status IN ('open', 'resolved', 'ignored')),
+  CONSTRAINT missing_ranges_range_ck CHECK (range_start_at < range_end_at)
+);
+
+CREATE TABLE backfill_jobs (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  status TEXT NOT NULL,
+  data_type TEXT NOT NULL,
+  plan JSONB NOT NULL,
+  target_start_at TIMESTAMPTZ NOT NULL,
+  target_end_at TIMESTAMPTZ NOT NULL,
+  estimated_request_count INTEGER NOT NULL,
+  estimated_row_count BIGINT NOT NULL,
+  estimated_storage_bytes BIGINT,
+  restart_mode TEXT,
+  created_by TEXT NOT NULL DEFAULT 'local_user',
+  approved_by TEXT,
+  approved_at TIMESTAMPTZ,
+  started_at TIMESTAMPTZ,
+  finished_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT backfill_jobs_status_ck CHECK (status IN ('planned', 'pending', 'running', 'paused', 'stopped', 'succeeded', 'failed')),
+  CONSTRAINT backfill_jobs_data_type_ck CHECK (data_type IN ('source_candle')),
+  CONSTRAINT backfill_jobs_restart_mode_ck CHECK (restart_mode IS NULL OR restart_mode IN ('safe_restart')),
+  CONSTRAINT backfill_jobs_target_range_ck CHECK (target_start_at < target_end_at),
+  CONSTRAINT backfill_jobs_estimated_request_count_ck CHECK (estimated_request_count >= 0),
+  CONSTRAINT backfill_jobs_estimated_row_count_ck CHECK (estimated_row_count >= 0)
+);
+
+CREATE TABLE backfill_job_targets (
+  backfill_job_id BIGINT NOT NULL REFERENCES backfill_jobs(id) ON DELETE CASCADE,
+  instrument_id BIGINT NOT NULL REFERENCES instruments(id),
+  status TEXT NOT NULL,
+  last_completed_at TIMESTAMPTZ,
+  error_code TEXT,
+  error_message TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (backfill_job_id, instrument_id),
+  CONSTRAINT backfill_job_targets_status_ck CHECK (status IN ('pending', 'running', 'paused', 'stopped', 'succeeded', 'failed'))
+);
+
+CREATE TABLE audit_logs (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  actor TEXT NOT NULL,
+  action TEXT NOT NULL,
+  target_type TEXT NOT NULL,
+  target_id TEXT,
+  request_id TEXT,
+  before_data JSONB,
+  after_data JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT audit_logs_actor_ck CHECK (actor IN ('system', 'local_user'))
+);
+
+CREATE TABLE notification_events (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  severity TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  target_type TEXT,
+  target_id TEXT,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  acknowledged_at TIMESTAMPTZ,
+  resolved_at TIMESTAMPTZ,
+  CONSTRAINT notification_events_severity_ck CHECK (severity IN ('info', 'warning', 'error', 'critical')),
+  CONSTRAINT notification_events_status_ck CHECK (status IN ('open', 'acknowledged', 'resolved'))
+);
+
+CREATE TABLE raw_response_samples (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  source TEXT NOT NULL,
+  endpoint TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  sampled_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  request_summary JSONB,
+  response_status INTEGER,
+  response_body JSONB,
+  error_message TEXT,
+  CONSTRAINT raw_response_samples_source_ck CHECK (source IN ('UPBIT')),
+  CONSTRAINT raw_response_samples_reason_ck CHECK (reason IN ('parse_error', 'schema_mismatch', 'unexpected_response', 'fixture_sample'))
+);
+
+CREATE INDEX source_candles_instrument_time_idx ON source_candles (instrument_id, candle_unit, candle_start_at DESC);
+CREATE INDEX ticker_snapshots_instrument_bucket_idx ON ticker_snapshots (instrument_id, bucket_at DESC);
+CREATE INDEX orderbook_summaries_instrument_bucket_idx ON orderbook_summaries (instrument_id, bucket_at DESC);
+CREATE INDEX collection_runs_started_at_idx ON collection_runs (started_at DESC);
+CREATE INDEX target_collection_results_run_idx ON target_collection_results (collection_run_id, instrument_id);
+CREATE INDEX missing_ranges_status_idx ON missing_ranges (status, instrument_id, data_type);
+CREATE INDEX backfill_jobs_status_idx ON backfill_jobs (status, created_at DESC);
+CREATE INDEX audit_logs_created_at_idx ON audit_logs (created_at DESC);
+CREATE INDEX notification_events_status_idx ON notification_events (status, created_at DESC);

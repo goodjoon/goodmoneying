@@ -1,7 +1,7 @@
 # 아키텍처 기준
 
 Status: Draft
-Last Updated: 2026-06-16
+Last Updated: 2026-06-17
 
 ## 목적
 
@@ -9,30 +9,83 @@ Last Updated: 2026-06-16
 
 ## 시스템 개요
 
-TBD: 런타임, 주요 구성요소, 외부 의존성, 데이터 저장소를 코드가 생긴 뒤 실제 구현 기준으로 기록한다.
+goodmoneying은 개인용 투자 데이터 플랫폼이다. 현재 M1 범위는 업비트(Upbit) KRW 마켓 데이터 수집, 저장, 품질 확인, 운영 화면 제공에 집중한다. 후속 단계에서는 국내 주식, 미국 주식, 뉴스/공시/리포트, 대규모 언어 모델(LLM, Large Language Model) 신호, 전략, 봇(Bot), 시뮬레이션(Simulation), 모의매매(Paper Trading), 실거래(Live Trading)가 같은 아키텍처 골격 위에 붙는다.
+
+M1은 수집 워커(Collection Worker), 운영 서버(Operations Server), 운영 화면, PostgreSQL 저장소로 구성한다. 수집 워커는 업비트 API에서 데이터를 가져와 PostgreSQL에 원천 사실을 저장하고, 운영 서버는 API와 화면용 상태 계산을 제공한다. 운영 화면은 React 기반으로 운영 상태, 수집 대상, 시장 리스트, 코인 상세, 백필(Backfill) 상태를 보여준다.
+
+## 런타임 구조
+
+| 런타임 | 책임 | M1 구현 | 확장 방향 |
+|---|---|---|---|
+| 수집 워커(Collection Worker) | 업비트 데이터 수집, 백필, 증분 수집(Incremental Collection), 데이터 완전성 검사(Data Completeness Check), 수집 품질 기록 | Python 단일 프로세스 | M3.5에서 다중 워커와 메시지 큐(Message Queue) 기반 작업 분배 검토 |
+| 운영 서버(Operations Server) | 화면 단위 API, 원천 리소스 API, 상태 계산, 설정 변경, 백필 제어, 감사 로그(Audit Log) 기록 | FastAPI | M3.5에서 stateless 다중 인스턴스와 고가용성(High Availability) 검토 |
+| 운영 화면 | 운영 상태 대시보드, 수집 대상/설정, 시장 리스트, 코인 상세, 백필 작업 화면 | React, HTTP 폴링(Polling), React Query | 후속 실시간성 화면에서 SSE(Server-Sent Events) 또는 WebSocket 결정 |
+| PostgreSQL | 원천 사실, 설정, 품질, 백필, 감사, 알림 이벤트(Notification Event) 저장 | 단일 인스턴스 | M3/M3.5에서 파티셔닝(Partitioning), 백업/복구, 복제(Replication), 장애 조치(Failover) 검토 |
+
+## 목표 모듈 지도
+
+M1에서는 업비트 수집 파이프라인(Upbit Collection Pipeline)만 상세 구현한다. 후속 모듈은 아키텍처 의존 방향과 연결 지점만 선반영하고, 상세 계약은 해당 마일스톤에서 확정한다.
 
 ## 모듈 색인
 
 | 모듈 | 설계 문서 | 책임 | 주요 의존성 |
 |---|---|---|---|
-| TBD | `docs/02_Architecture/TBD.md` | TBD | TBD |
+| 업비트 수집 파이프라인(Upbit Collection Pipeline) | `docs/02_Architecture/upbit-collection-pipeline.md` | 업비트 KRW 마켓 수집, 저장, 품질 확인, 운영 API/화면 제공 | PostgreSQL, 업비트 API, `docs/contracts/db/schema.sql`, `docs/contracts/api/openapi.yaml` |
+| 국내 주식 수집 | 후속 작성 | 국내 주식 가격/거래량, 시가총액, 수급, 공매도(Short Selling), 재무지표 수집 | 업비트 수집 파이프라인의 수집 진행률(Collection Coverage), 품질 모델 재사용 |
+| 미국 주식 수집 | 후속 작성 | 미국 주식 가격/거래량, 시가총액, 재무지표 수집 | 시장별 거래 시간 정책, 공통 거래 상품(Instrument) 모델 |
+| 문서/이벤트 수집 | 후속 작성 | 뉴스, 공시, 증권사 리포트 원천 수집 | 거래 상품, 외부 문서 공급원, 저장소 |
+| LLM 신호 | 후속 작성 | 뉴스/공시/리포트 요약과 구조화 신호(Signal) 생성 | 문서/이벤트 수집, 시계열(Time Series) 정렬 |
+| 전략과 백테스트(Backtest) | 후속 작성 | 데이터와 신호를 조합한 전략 설계와 과거 검증 | 시장 데이터, LLM 신호, 파생 캔들(Derived Candle) |
+| 봇과 시뮬레이션 | 후속 작성 | 전략 파이프라인(Pipeline), 봇 설정, 실제 주문 없는 판단/손익 시뮬레이션 | 전략, 백테스트, 시장 데이터 |
 
 ## 계약 위치
 
 | 계약 | 위치 | 기준 |
 |---|---|---|
-| DB schema | `docs/contracts/db/` | SQL schema 또는 migration |
-| HTTP API | `docs/contracts/api/` | OpenAPI 또는 repo가 선택한 API schema |
-| Internal message | `docs/contracts/protobuf/` | Protobuf 또는 repo가 선택한 message schema |
+| DB schema | `docs/contracts/db/schema.sql` | PostgreSQL 기준 schema |
+| HTTP API | `docs/contracts/api/openapi.yaml` | FastAPI 운영 서버가 제공해야 하는 OpenAPI 계약 |
+| Internal message | `docs/contracts/protobuf/` | M1에서는 메시지 계약 없음. M3.5 메시지 큐 도입 시 이 위치 또는 repo가 선택한 schema 파일에 기록 |
 
 ## 데이터 흐름
 
-TBD: 사용자 요청, 내부 처리, 저장, 외부 시스템 연동 흐름을 Mermaid 또는 단계형 설명으로 기록한다.
+### M1 수집 흐름
+
+1. 수집 워커가 DB 설정 테이블에서 후보 유니버스(Candidate Universe), 활성 수집 대상(Active Collection Target), 수집 범위 설정을 읽는다.
+2. 수집 워커가 업비트 API rate limiter를 통과해 현재가 스냅샷(Ticker Snapshot), 원천 캔들(Source Candle), 호가 요약(Orderbook Summary)을 수집한다.
+3. 수집 워커는 수집 실행(Collection Run)과 대상별 수집 결과(Target Collection Result)를 기록한다.
+4. 원천 캔들은 `(instrument_id, source, candle_unit, candle_start_at)` 유니크 키로 upsert한다.
+5. 현재가 스냅샷과 호가 요약은 `(instrument_id, source, bucket_at)` 유니크 키로 upsert한다. 같은 버킷은 더 늦은 `collected_at`을 가진 성공 수집 결과가 대표 행을 갱신한다.
+6. 데이터 완전성 검사 작업은 목표 범위와 저장 데이터를 비교해 결측 구간(Missing Range)을 생성하거나 해결한다.
+7. 운영 서버는 DB의 원천 사실을 읽어 운영 대시보드의 정상/주의/장애 상태, 수집 진행률, 화면용 View Model을 계산한다.
+
+### M1 백필 흐름
+
+1. 사용자가 수집 대상 또는 수집 범위 설정을 바꾸면 운영 서버가 백필 계획(Backfill Plan)을 생성한다.
+2. 사용자는 예상 요청 수와 저장 예상량을 보고 백필 작업(Backfill Job)을 승인한다.
+3. 수집 워커는 DB 상태 폴링(Polling)으로 백필 작업 상태를 읽고 실행한다.
+4. 사용자는 백필 작업을 일시정지(Pause), 중지(Stop), 이어서하기(Resume), 안전 재시작(Safe Restart)할 수 있다.
+5. 안전 재시작은 기존 데이터를 삭제하지 않고 목표 범위 전체를 재검사한다.
+6. 삭제 후 재수집(Destructive Rebuild)은 M1 이후 기능으로 둔다.
+
+## 아키텍처 로드맵
+
+| 시점 | 결정 또는 고도화 | 반드시 다시 물어볼 질문 |
+|---|---|---|
+| M1 | PostgreSQL 단일 저장소, 단일 수집 워커, HTTP 폴링 | 구현 중 계약이 제품 요구사항과 충돌하는가 |
+| M3 | 호가 원천 스냅샷(Snapshot) 저장 확대 | 보존 기간, 파티셔닝, 압축, 다운샘플링(Downsampling), 별도 저장소가 필요한가 |
+| M3.5 | 수평 확장(Horizontal Scaling)과 고가용성 고도화 | 메시지 큐 기술은 무엇인가, 다중 워커 작업 분배와 제어 이벤트를 어떻게 처리할 것인가, PostgreSQL 복제/장애 조치 전략은 무엇인가 |
+| M4 전 | 국내 주식 확장 게이트 | 업비트 데이터 모델을 공통 시장 데이터 모델로 어디까지 일반화할 것인가 |
+| MVP 이후 | 외부 알림 발송 | 채널, 등급, 빈도 제한, 확인/해결 상태, 다중 수신자 확장 여부 |
+| MVP 이후 | 기술적 분석 지표 | 지표 계산 위치, 캐싱, 전략 입력 연결, 사용자 정의 지표 범위 |
+| 후속 실시간 화면 | 실시간 전송 방식 | SSE와 WebSocket 중 무엇이 맞는가, 재연결과 누락 이벤트 복구가 필요한가 |
 
 ## 운영과 검증 기준
 
 - 검증 증적은 `docs/Test/`에 실제 명령과 결과로 남긴다.
 - 인계가 필요한 변경은 `docs/History/`에 변경 요약, 리스크, 후속 작업을 남긴다.
+- M1 완료는 제품 세로 절편 기준으로 판단한다. 백엔드 수집만 끝난 상태나 빈 화면만 있는 상태는 완료로 보지 않는다.
+- M1 검증은 DB 계약 테스트, 수집 통합 테스트, API 테스트, 브라우저 E2E(End-to-End) 테스트를 포함한다.
+- 기본 자동화 테스트는 mock/fixture 기반으로 실행하고, 실제 업비트 API 부분 호출 검증은 별도 `live` 테스트 프로필(profile)로 분리한다.
 
 ## 변경 규칙
 

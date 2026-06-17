@@ -2,9 +2,9 @@
 
 DB schema의 source of truth를 둔다.
 
-## 권장 파일
+## 기준 파일
 
-- `schema.sql`: 현재 기준 schema
+- `schema.sql`: 현재 기준 PostgreSQL schema
 - migration 파일 또는 migration 디렉터리 링크: 실제 적용 순서가 중요한 경우
 
 ## 기록 기준

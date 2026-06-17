@@ -1,0 +1,141 @@
+# 업비트 수집 파이프라인 설계
+
+Status: Draft
+Last Updated: 2026-06-17
+Related Product: `docs/01_Product.md`
+Related Task: `docs/Task/M1-T01-2026-06-17-업비트-수집-운영-mvp-아키텍처-계약-설계.md`
+Related DB Contract: `docs/contracts/db/schema.sql`
+Related API Contract: `docs/contracts/api/openapi.yaml`
+
+## 책임
+
+업비트 수집 파이프라인(Upbit Collection Pipeline)은 M1의 핵심 경계다. 업비트(Upbit) KRW 마켓 데이터를 수집, 저장, 품질 확인, 운영 상태 노출까지 책임진다.
+
+- 후보 유니버스(Candidate Universe) 갱신
+- 활성 수집 대상(Active Collection Target) 50개 유지
+- 원천 캔들(Source Candle), 현재가 스냅샷(Ticker Snapshot), 호가 요약(Orderbook Summary) 수집
+- 백필(Backfill), 증분 수집(Incremental Collection), 데이터 완전성 검사(Data Completeness Check)
+- 수집 실행(Collection Run), 대상별 수집 결과(Target Collection Result), 결측 구간(Missing Range), 수집 진행률(Collection Coverage) 기록
+- 운영 서버(Operations Server)를 통한 화면 API와 원천 리소스 API 제공
+- 감사 로그(Audit Log), 알림 이벤트(Notification Event) 저장
+
+## 책임이 아닌 것
+
+- 국내 주식과 미국 주식 수집
+- 뉴스, 공시, 증권사 리포트 수집
+- 대규모 언어 모델(LLM, Large Language Model) 요약과 구조화 신호(Signal)
+- 전략, 백테스트(Backtest), 봇(Bot), 시뮬레이션(Simulation), 모의매매(Paper Trading), 실거래(Live Trading)
+- 메시지 큐(Message Queue) 기반 다중 워커 작업 분배
+- 삭제 후 재수집(Destructive Rebuild)
+- 외부 알림 발송
+
+## 구성요소
+
+| 구성요소 | 책임 | 구현 기준 |
+|---|---|---|
+| 수집 워커(Collection Worker) | 업비트 API 호출, rate limit 관리, 수집/백필/완전성 검사 실행 | Python 단일 프로세스 |
+| 운영 서버(Operations Server) | 화면 단위 View Model API, 원천 리소스 API, 쓰기 API, 상태 계산 | FastAPI |
+| 운영 화면 | 대시보드, 수집 대상/설정, 백필 제어, 시장 리스트, 코인 상세 | React, React Query, HTTP 폴링 |
+| PostgreSQL | 원천 사실, 설정, 품질, 감사, 알림 이벤트 저장 | `docs/contracts/db/schema.sql` |
+
+## 입력과 출력
+
+### 입력
+
+- 업비트 KRW 마켓 현재가 API 응답
+- 업비트 1분 캔들 API 응답
+- 업비트 일봉 API 응답
+- 업비트 호가 API 응답
+- 운영 화면의 활성 수집 대상 변경
+- 운영 화면의 수집 범위 설정 변경
+- 운영 화면의 백필 계획 승인과 제어 명령
+
+### 출력
+
+- PostgreSQL 원천 사실 테이블
+- 화면 단위 API 응답
+- 내부 안정 계약(Internal Stable Contract)인 원천 리소스 API 응답
+- 감사 로그(Audit Log)
+- 알림 이벤트(Notification Event)
+
+## 주요 흐름
+
+### 후보 유니버스 갱신
+
+1. 수집 워커가 업비트 KRW 마켓 전체 현재가 스냅샷을 조회한다.
+2. 24시간 누적 거래대금 기준으로 내림차순 정렬한다.
+3. 상위 100개를 후보 유니버스 스냅샷으로 저장한다.
+4. 최초 실행 시 상위 50개를 활성 수집 대상으로 자동 체크할 수 있다.
+5. 기존 활성 수집 대상이 상위 100 밖으로 이탈해도 자동 제거하지 않고 후보 유니버스 이탈 상태로 표시한다.
+
+### 증분 수집
+
+1. 수집 워커가 활성 수집 대상을 읽는다.
+2. 현재가 스냅샷과 호가 요약은 대상 전체가 1~3분 안에 갱신되도록 1분 주기 목표로 수집한다.
+3. 1분 원천 캔들은 매분 직전 완성 캔들을 수집한다.
+4. 일봉은 10~30분 주기 또는 하루 마감 후 보정한다.
+5. 모든 API 호출은 워커 내부 전역 rate limiter를 통과한다.
+6. 각 수집은 수집 실행과 대상별 수집 결과를 남긴다.
+
+### 백필
+
+1. 사용자가 수집 대상 또는 수집 범위 설정을 바꾸면 운영 서버가 백필 계획을 생성한다.
+2. 백필 계획은 대상, 기간, 예상 요청 수, 저장 예상량을 보수적 추정치로 보여준다.
+3. 사용자가 승인하면 백필 작업이 생성된다.
+4. 수집 워커는 DB 폴링으로 작업 상태를 읽고 백필을 실행한다.
+5. 백필은 일시정지, 중지, 이어서하기, 안전 재시작을 지원한다.
+6. 삭제 후 재수집은 M1 이후 기능이다.
+
+### 데이터 완전성 검사
+
+1. 데이터 완전성 검사 작업은 목표 수집 범위와 저장 데이터를 비교한다.
+2. 기대 데이터가 없거나 복구가 필요한 구간은 결측 구간으로 저장한다.
+3. 백필로 복구된 결측 구간은 해결 상태로 전환한다.
+4. 운영 서버는 결측 구간과 최신성을 읽어 수집 진행률과 화면용 상태를 계산한다.
+
+## 데이터 기준
+
+- 저장 시각(Storage Time)은 UTC 기준 `timestamptz`다.
+- 업비트 KRW 마켓 표시 시각(Display Time)은 KST(Korea Standard Time)를 기본으로 한다.
+- 금액, 수량, 거래대금, 등락률은 DB에서 `numeric`, Python에서 `Decimal`로 다룬다.
+- API 응답의 Decimal 값은 문자열로 보낸다.
+- 원천 캔들 유니크 키는 `(instrument_id, source, candle_unit, candle_start_at)`이다.
+- 현재가 스냅샷과 호가 요약 유니크 키는 `(instrument_id, source, bucket_at)`이다.
+- 같은 수집 버킷 시간(Collection Bucket Time)에 재수집이 발생하면 더 늦은 `collected_at`을 가진 성공 수집 결과가 대표 행을 갱신한다.
+
+## 운영 화면
+
+| 화면 | API 성격 | 자동 갱신 |
+|---|---|---|
+| 운영 상태 대시보드 | 파이프라인 건강도, 최신성, 실패, 결측, 저장량, 수집 진행률 | 10~15초 |
+| 수집 대상/설정 | 후보 유니버스, 활성 수집 대상, 수집 범위 설정, 백필 계획 | 수동 또는 변경 후 갱신 |
+| 백필 작업 | 백필 상태와 제어 | 실행 중 5~10초 |
+| 시장 리스트 | 현재가, 거래대금, 등락률, 품질 상태 | 30초 |
+| 코인 상세 | 캔들 차트, 호가 요약, 품질 이력 | 30초 또는 사용자가 켜는 실시간 모드 |
+
+## 보안과 감사
+
+- M1은 로컬 신뢰 네트워크를 전제로 한다.
+- 쓰기 API는 단순 운영 토큰(Authentication)을 요구한다.
+- 활성 수집 대상 저장, 수집 범위 설정 변경, 백필 승인/제어는 감사 로그를 남긴다.
+- 다중 사용자 권한(Authorization)은 M1 범위가 아니다.
+
+## 의존성
+
+- 업비트 API
+- PostgreSQL
+- FastAPI
+- React
+- Docker Compose
+
+## 관련 계약
+
+- DB: `docs/contracts/db/schema.sql`
+- API: `docs/contracts/api/openapi.yaml`
+
+## 리스크와 후속 작업
+
+- M1은 단일 워커 구조이므로 다중 워커 장애 복구와 작업 분배는 M3.5에서 고도화한다.
+- M1은 삭제 없음 정책을 사용하므로 저장량 증가를 M3/M3.5에서 반드시 재검토한다.
+- 메시지 큐(Message Queue), 분산 rate limiter, PostgreSQL 복제/장애 조치(Failover)는 M3.5 필수 결정 항목이다.
+- 기술적 분석 지표, 외부 알림 발송, SSE/WebSocket은 MVP 이후 별도 결정 질문을 거쳐 설계한다.
