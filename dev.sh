@@ -52,6 +52,7 @@ POSTGRES_PORT="${GOODMONEYING_POSTGRES_PORT:-5432}"
 OPERATOR_TOKEN="${GOODMONEYING_OPERATOR_TOKEN:-local-dev-token}"
 DATABASE_URL="${GOODMONEYING_DATABASE_URL:-postgresql://goodmoneying:goodmoneying@127.0.0.1:${POSTGRES_PORT}/goodmoneying}"
 WORKER_INTERVAL_SECONDS="${GOODMONEYING_WORKER_INTERVAL_SECONDS:-60}"
+PYTHON_BIN="${GOODMONEYING_PYTHON_BIN:-"$ROOT_DIR/.venv/bin/python"}"
 
 usage() {
   cat <<'USAGE'
@@ -88,6 +89,7 @@ usage() {
   GOODMONEYING_API_PORT
   GOODMONEYING_WEB_PORT
   GOODMONEYING_WORKER_INTERVAL_SECONDS
+  GOODMONEYING_PYTHON_BIN
 USAGE
 }
 
@@ -271,7 +273,7 @@ start_api() {
     env PYTHONPATH=apps/api:apps/worker:packages/shared \
       GOODMONEYING_DATABASE_URL="$DATABASE_URL" \
       GOODMONEYING_OPERATOR_TOKEN="$OPERATOR_TOKEN" \
-      uv run uvicorn goodmoneying_api.main:app --host "$API_HOST" --port "$API_PORT"
+      "$PYTHON_BIN" -m uvicorn goodmoneying_api.main:app --host "$API_HOST" --port "$API_PORT"
 }
 
 start_web() {
@@ -288,7 +290,8 @@ start_worker() {
       GOODMONEYING_OPERATOR_TOKEN="$OPERATOR_TOKEN" \
       GOODMONEYING_LIVE_UPBIT="${GOODMONEYING_LIVE_UPBIT:-1}" \
       GOODMONEYING_WORKER_INTERVAL_SECONDS="$WORKER_INTERVAL_SECONDS" \
-      bash -c 'while true; do uv run python -m goodmoneying_worker.main; sleep "$GOODMONEYING_WORKER_INTERVAL_SECONDS"; done'
+      GOODMONEYING_PYTHON_BIN="$PYTHON_BIN" \
+      bash -c 'while true; do "$GOODMONEYING_PYTHON_BIN" -m goodmoneying_worker.main; sleep "$GOODMONEYING_WORKER_INTERVAL_SECONDS"; done'
 }
 
 start_app_unit() {

@@ -51,11 +51,6 @@ class PostgresOperationsRepository:
 
     def _apply_schema_if_empty(self) -> None:
         with self._connect() as conn:
-            exists = conn.execute(
-                "SELECT to_regclass('public.instruments') AS table_name"
-            ).fetchone()
-            if exists and exists["table_name"]:
-                return
             conn.execute(self._schema_path.read_text())
 
     def upsert_instrument(self, market_code: str, display_name: str) -> Instrument:

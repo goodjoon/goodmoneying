@@ -69,3 +69,10 @@ def test_dev_script_shell_environment_overrides_env_file(tmp_path: Path) -> None
 
     assert result.returncode == 0
     assert "endpoint=http://127.0.0.1:19100" in result.stdout
+
+
+def test_dev_script_uses_python_binary_for_long_running_python_processes() -> None:
+    script = Path("dev.sh").read_text()
+
+    assert '"$PYTHON_BIN" -m uvicorn goodmoneying_api.main:app' in script
+    assert '"$GOODMONEYING_PYTHON_BIN" -m goodmoneying_worker.main' in script
