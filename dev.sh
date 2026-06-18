@@ -2,6 +2,44 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+load_env_file() {
+  local env_file="${GOODMONEYING_ENV_FILE:-"$ROOT_DIR/.env"}"
+  [[ -f "$env_file" ]] || return 0
+
+  local line key value
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="$(trim "$line")"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    if [[ "$line" == export[[:space:]]* ]]; then
+      line="$(trim "${line#export}")"
+    fi
+    [[ "$line" == *=* ]] || continue
+
+    key="$(trim "${line%%=*}")"
+    value="$(trim "${line#*=}")"
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
+      value="${value:1:${#value}-2}"
+    fi
+
+    if [[ -z "${!key+x}" ]]; then
+      export "$key=$value"
+    fi
+  done <"$env_file"
+}
+
+load_env_file
+
 RUNTIME_DIR="${GOODMONEYING_DEV_DIR:-"$ROOT_DIR/.dev"}"
 PID_DIR="$RUNTIME_DIR/pids"
 LOG_DIR="$RUNTIME_DIR/logs"
@@ -36,6 +74,7 @@ usage() {
 설명:
   infra 는 Podman Compose 로 PostgreSQL 을 관리한다.
   app 은 로컬 개발 프로세스로 실행한다. API 는 기본적으로 PostgreSQL 을 바라본다.
+  루트 .env 파일이 있으면 자동으로 읽는다. 셸 환경변수는 .env 값보다 우선한다.
 
 기본 endpoint:
   Web: http://127.0.0.1:5173/
@@ -43,6 +82,7 @@ usage() {
   Health: http://127.0.0.1:8000/health
 
 주요 환경변수:
+  GOODMONEYING_ENV_FILE
   GOODMONEYING_DATABASE_URL
   GOODMONEYING_OPERATOR_TOKEN
   GOODMONEYING_API_PORT
@@ -287,16 +327,16 @@ stop_app_unit() {
 status_app_unit() {
   local unit="$1"
   local pid
+  local endpoint=""
+  case "$unit" in
+    api) endpoint=" endpoint=http://${API_HOST}:${API_PORT}" ;;
+    web) endpoint=" endpoint=http://${WEB_HOST}:${WEB_PORT}/" ;;
+  esac
   pid="$(pid_for_unit "$unit" 2>/dev/null || true)"
   if [[ -n "$pid" ]]; then
-    printf 'app %-7s running pid=%s' "$unit" "$pid"
-    case "$unit" in
-      api) printf ' endpoint=http://%s:%s' "$API_HOST" "$API_PORT" ;;
-      web) printf ' endpoint=http://%s:%s/' "$WEB_HOST" "$WEB_PORT" ;;
-    esac
-    printf '\n'
+    printf 'app %-7s running pid=%s%s\n' "$unit" "$pid" "$endpoint"
   else
-    printf 'app %-7s stopped\n' "$unit"
+    printf 'app %-7s stopped%s\n' "$unit" "$endpoint"
   fi
 }
 
