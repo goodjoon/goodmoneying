@@ -33,6 +33,7 @@ def test_dashboard_candidate_market_and_detail_endpoints() -> None:
     assert len(dashboard.json()["coverage"]) == 150
     assert len(dashboard.json()["targets"]) == 50
     first_target = dashboard.json()["targets"][0]
+    totals = dashboard.json()["totals"]
     assert first_target["instrument"]["marketCode"] == "KRW-BTC"
     assert first_target["overallStatus"] == "latest_collecting"
     assert first_target["overallStatusLabel"] == "최신수집중"
@@ -40,17 +41,32 @@ def test_dashboard_candidate_market_and_detail_endpoints() -> None:
     assert first_target["plan"]["rangeTimeZone"] == "KST"
     assert first_target["coverageSegments"][0]["status"] == "collected"
     assert first_target["coverageSegments"][0]["offsetPercent"] == "0"
+    assert totals["activeTargetLimit"] == 50
+    assert totals["normalTargets"] + totals["warningTargets"] + totals["incidentTargets"] == 50
+    assert totals["storageBytesToday"] > 0
+    assert totals["storageBytesTodayDisplay"].endswith(("MB", "GB"))
+    assert "failureRate24h" in totals
+    assert dashboard.json()["healthChecks"][0]["title"]
     assert universe.status_code == 200
     assert len(universe.json()["entries"]) == 100
+    assert universe.json()["entries"][0]["accTradePrice24hDisplay"].isdigit()
+    assert universe.json()["entries"][0]["qualityStatus"] in {"normal", "warning", "incident"}
+    assert universe.json()["entries"][0]["collectionRangeDisplay"].endswith("현재")
     assert market_list.status_code == 200
     assert len(market_list.json()["rows"]) == 50
-    assert market_list.json()["rows"][0]["accTradePrice24hDisplay"].isdigit()
+    first_market_row = market_list.json()["rows"][0]
+    assert first_market_row["accTradePrice24hDisplay"].isdigit()
+    assert first_market_row["coveragePercent"]
+    assert first_market_row["storageBytesDisplay"].endswith(("MB", "GB"))
 
     instrument_id = market_list.json()["rows"][0]["instrument"]["id"]
     detail = client.get(f"/v1/instruments/{instrument_id}")
     assert detail.status_code == 200
     assert detail.json()["latestTicker"]["tradePrice"]
     assert detail.json()["latestOrderbook"]["spread"]
+    assert detail.json()["duplicateRows24h"] >= 0
+    assert detail.json()["tickerFreshnessLabel"].endswith("전")
+    assert detail.json()["orderbookFreshnessLabel"].endswith("전")
 
 
 def test_write_apis_require_operator_token() -> None:

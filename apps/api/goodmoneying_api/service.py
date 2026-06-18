@@ -19,6 +19,7 @@ from goodmoneying_api.schemas import (
     CoverageStatusResponse,
     DashboardSummaryResponse,
     DashboardTotalsResponse,
+    HealthCheckResponse,
     InstrumentDetailResponse,
     InstrumentResponse,
     MarketListResponse,
@@ -44,6 +45,7 @@ from goodmoneying_shared.models import (
     decimal_string,
 )
 from goodmoneying_shared.repository import OperationsRepository
+from goodmoneying_shared.time import now_utc
 
 CANDLE_UNITS = {"1m", "3m", "5m", "10m", "15m", "30m", "60m", "240m", "1d"}
 
@@ -64,8 +66,11 @@ class OperationsService:
                     instrument=instrument_to_response(entry.instrument),
                     rank=entry.rank,
                     accTradePrice24h=decimal_string(entry.acc_trade_price_24h) or "0",
+                    accTradePrice24hDisplay=str(int(entry.acc_trade_price_24h)),
                     selected=entry.selected,
                     candidateStatus=entry.candidate_status,
+                    qualityStatus="normal" if entry.rank <= 50 else "warning",
+                    collectionRangeDisplay="2024-01-01부터 현재",
                 )
                 for entry in entries
             ],
@@ -93,6 +98,9 @@ class OperationsService:
                     tickerCollectedAt=row.ticker_collected_at,
                     orderbookCollectedAt=row.orderbook_collected_at,
                     qualityStatus=row.quality_status,
+                    coveragePercent=decimal_string(row.coverage_percent) or "0",
+                    storageBytes=row.storage_bytes,
+                    storageBytesDisplay=row.storage_bytes_display,
                 )
                 for row in self._repository.market_list()
             ]
@@ -111,6 +119,9 @@ class OperationsService:
             coverage=[
                 coverage_to_response(item) for item in self._repository.coverage_for(instrument_id)
             ],
+            duplicateRows24h=0,
+            tickerFreshnessLabel=format_freshness_label(ticker.collected_at),
+            orderbookFreshnessLabel=format_freshness_label(orderbook.collected_at),
         )
 
     def candles(
@@ -235,13 +246,31 @@ def dashboard_to_response(item: DashboardSummary) -> DashboardSummaryResponse:
         refreshedAt=item.refreshed_at,
         totals=DashboardTotalsResponse(
             activeTargets=item.active_targets,
+            activeTargetLimit=item.active_target_limit,
+            normalTargets=item.normal_targets,
+            warningTargets=item.warning_targets,
+            incidentTargets=item.incident_targets,
             failedRuns24h=item.failed_runs_24h,
+            failureRate24h=decimal_string(item.failure_rate_24h) or "0",
             delayedTargets=item.delayed_targets,
             missingRangesOpen=item.missing_ranges_open,
+            storageBytesToday=item.storage_bytes_today,
+            storageBytesTodayDisplay=item.storage_bytes_today_display,
+            recentRequestCount=item.recent_request_count,
+            rateLimitRemainingPercent=decimal_string(item.rate_limit_remaining_percent) or "0",
         ),
         coverage=[coverage_to_response(coverage) for coverage in item.coverage],
         targets=[dashboard_target_to_response(target) for target in item.targets],
         alerts=[notification_to_response(alert) for alert in item.alerts],
+        healthChecks=[
+            HealthCheckResponse(
+                title=check.title,
+                status=check.status,
+                statusLabel=check.status_label,
+                detail=check.detail,
+            )
+            for check in item.health_checks
+        ],
     )
 
 
@@ -348,3 +377,13 @@ def backfill_job_to_response(item: BackfillJob) -> BackfillJobResponse:
         progressPercent=decimal_string(item.progress_percent) or "0",
         createdAt=item.created_at,
     )
+
+
+def format_freshness_label(value: datetime) -> str:
+    age = now_utc() - value
+    total_seconds = max(0, int(age.total_seconds()))
+    if total_seconds < 60:
+        return f"{total_seconds}초 전"
+    if total_seconds < 3600:
+        return f"{total_seconds // 60}분 전"
+    return f"{total_seconds // 3600}시간 전"

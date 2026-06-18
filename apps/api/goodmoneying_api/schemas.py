@@ -86,9 +86,25 @@ class CollectionDashboardTargetResponse(BaseModel):
 
 class DashboardTotalsResponse(BaseModel):
     activeTargets: int
+    activeTargetLimit: int
+    normalTargets: int
+    warningTargets: int
+    incidentTargets: int
     failedRuns24h: int
+    failureRate24h: str
     delayedTargets: int
     missingRangesOpen: int
+    storageBytesToday: int
+    storageBytesTodayDisplay: str
+    recentRequestCount: int
+    rateLimitRemainingPercent: str
+
+
+class HealthCheckResponse(BaseModel):
+    title: str
+    status: Literal["normal", "warning", "incident"]
+    statusLabel: str
+    detail: str
 
 
 class DashboardSummaryResponse(BaseModel):
@@ -98,14 +114,18 @@ class DashboardSummaryResponse(BaseModel):
     coverage: list[CoverageStatusResponse]
     targets: list[CollectionDashboardTargetResponse]
     alerts: list[NotificationEventResponse]
+    healthChecks: list[HealthCheckResponse]
 
 
 class CandidateUniverseEntryResponse(BaseModel):
     instrument: InstrumentResponse
     rank: int
     accTradePrice24h: str
+    accTradePrice24hDisplay: str
     selected: bool
     candidateStatus: Literal["in_universe", "out_of_universe"]
+    qualityStatus: Literal["normal", "warning", "incident"]
+    collectionRangeDisplay: str
 
 
 class CandidateUniverseResponse(BaseModel):
@@ -131,6 +151,9 @@ class MarketListRowResponse(BaseModel):
     tickerCollectedAt: datetime
     orderbookCollectedAt: datetime
     qualityStatus: Literal["normal", "warning", "incident"]
+    coveragePercent: str
+    storageBytes: int
+    storageBytesDisplay: str
 
 
 class MarketListResponse(BaseModel):
@@ -163,6 +186,9 @@ class InstrumentDetailResponse(BaseModel):
     latestTicker: TickerSnapshotResponse
     latestOrderbook: OrderbookSummaryResponse
     coverage: list[CoverageStatusResponse]
+    duplicateRows24h: int
+    tickerFreshnessLabel: str
+    orderbookFreshnessLabel: str
 
 
 class CandleResponse(BaseModel):

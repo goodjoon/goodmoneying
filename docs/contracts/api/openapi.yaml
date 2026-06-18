@@ -389,16 +389,47 @@ components:
           format: date-time
         totals:
           type: object
-          required: [activeTargets, failedRuns24h, delayedTargets, missingRangesOpen]
+          required:
+            - activeTargets
+            - activeTargetLimit
+            - normalTargets
+            - warningTargets
+            - incidentTargets
+            - failedRuns24h
+            - failureRate24h
+            - delayedTargets
+            - missingRangesOpen
+            - storageBytesToday
+            - storageBytesTodayDisplay
+            - recentRequestCount
+            - rateLimitRemainingPercent
           properties:
             activeTargets:
               type: integer
+            activeTargetLimit:
+              type: integer
+            normalTargets:
+              type: integer
+            warningTargets:
+              type: integer
+            incidentTargets:
+              type: integer
             failedRuns24h:
               type: integer
+            failureRate24h:
+              $ref: "#/components/schemas/DecimalString"
             delayedTargets:
               type: integer
             missingRangesOpen:
               type: integer
+            storageBytesToday:
+              type: integer
+            storageBytesTodayDisplay:
+              type: string
+            recentRequestCount:
+              type: integer
+            rateLimitRemainingPercent:
+              $ref: "#/components/schemas/DecimalString"
         coverage:
           type: array
           items:
@@ -411,6 +442,23 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/NotificationEvent"
+        healthChecks:
+          type: array
+          items:
+            $ref: "#/components/schemas/HealthCheck"
+    HealthCheck:
+      type: object
+      required: [title, status, statusLabel, detail]
+      properties:
+        title:
+          type: string
+        status:
+          type: string
+          enum: [normal, warning, incident]
+        statusLabel:
+          type: string
+        detail:
+          type: string
     CoverageStatus:
       type: object
       required: [instrumentId, dataType, status, lastSuccessfulAt]
@@ -533,7 +581,15 @@ components:
             $ref: "#/components/schemas/CandidateUniverseEntry"
     CandidateUniverseEntry:
       type: object
-      required: [instrument, rank, accTradePrice24h, selected, candidateStatus]
+      required:
+        - instrument
+        - rank
+        - accTradePrice24h
+        - accTradePrice24hDisplay
+        - selected
+        - candidateStatus
+        - qualityStatus
+        - collectionRangeDisplay
       properties:
         instrument:
           $ref: "#/components/schemas/Instrument"
@@ -541,11 +597,18 @@ components:
           type: integer
         accTradePrice24h:
           $ref: "#/components/schemas/DecimalString"
+        accTradePrice24hDisplay:
+          type: string
         selected:
           type: boolean
         candidateStatus:
           type: string
           enum: [in_universe, out_of_universe]
+        qualityStatus:
+          type: string
+          enum: [normal, warning, incident]
+        collectionRangeDisplay:
+          type: string
     UpdateCollectionTargetsRequest:
       type: object
       required: [instrumentIds]
@@ -576,7 +639,15 @@ components:
             $ref: "#/components/schemas/MarketListRow"
     MarketListRow:
       type: object
-      required: [instrument, tradePrice, accTradePrice24h, accTradePrice24hDisplay, qualityStatus]
+      required:
+        - instrument
+        - tradePrice
+        - accTradePrice24h
+        - accTradePrice24hDisplay
+        - qualityStatus
+        - coveragePercent
+        - storageBytes
+        - storageBytesDisplay
       properties:
         instrument:
           $ref: "#/components/schemas/Instrument"
@@ -598,9 +669,22 @@ components:
         qualityStatus:
           type: string
           enum: [normal, warning, incident]
+        coveragePercent:
+          $ref: "#/components/schemas/DecimalString"
+        storageBytes:
+          type: integer
+        storageBytesDisplay:
+          type: string
     InstrumentDetailResponse:
       type: object
-      required: [instrument, latestTicker, latestOrderbook, coverage]
+      required:
+        - instrument
+        - latestTicker
+        - latestOrderbook
+        - coverage
+        - duplicateRows24h
+        - tickerFreshnessLabel
+        - orderbookFreshnessLabel
       properties:
         instrument:
           $ref: "#/components/schemas/Instrument"
@@ -612,6 +696,12 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/CoverageStatus"
+        duplicateRows24h:
+          type: integer
+        tickerFreshnessLabel:
+          type: string
+        orderbookFreshnessLabel:
+          type: string
     CandleSeriesResponse:
       type: object
       required: [unit, candles]

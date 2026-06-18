@@ -73,21 +73,39 @@ export type DashboardSummary = {
   refreshedAt: string;
   totals: {
     activeTargets: number;
+    activeTargetLimit: number;
+    normalTargets: number;
+    warningTargets: number;
+    incidentTargets: number;
     failedRuns24h: number;
+    failureRate24h: string;
     delayedTargets: number;
     missingRangesOpen: number;
+    storageBytesToday: number;
+    storageBytesTodayDisplay: string;
+    recentRequestCount: number;
+    rateLimitRemainingPercent: string;
   };
   coverage: CoverageStatus[];
   targets: CollectionDashboardTarget[];
   alerts: NotificationEvent[];
+  healthChecks: {
+    title: string;
+    status: Status;
+    statusLabel: string;
+    detail: string;
+  }[];
 };
 
 export type CandidateUniverseEntry = {
   instrument: Instrument;
   rank: number;
   accTradePrice24h: string;
+  accTradePrice24hDisplay: string;
   selected: boolean;
   candidateStatus: "in_universe" | "out_of_universe";
+  qualityStatus: Status;
+  collectionRangeDisplay: string;
 };
 
 export type MarketListRow = {
@@ -99,6 +117,9 @@ export type MarketListRow = {
   tickerCollectedAt: string;
   orderbookCollectedAt: string;
   qualityStatus: Status;
+  coveragePercent: string;
+  storageBytes: number;
+  storageBytesDisplay: string;
 };
 
 export type TickerSnapshot = {
@@ -138,6 +159,9 @@ export type InstrumentDetail = {
   latestTicker: TickerSnapshot;
   latestOrderbook: OrderbookSummary;
   coverage: CoverageStatus[];
+  duplicateRows24h: number;
+  tickerFreshnessLabel: string;
+  orderbookFreshnessLabel: string;
 };
 
 export type BackfillJob = {
@@ -278,8 +302,11 @@ export function demoSnapshot(): OperationsSnapshot {
     instrument,
     rank: index + 1,
     accTradePrice24h: `${100000000000 - index * 1000000}`,
+    accTradePrice24hDisplay: `${100000000000 - index * 1000000}`,
     selected: index < 50,
-    candidateStatus: "in_universe" as const
+    candidateStatus: "in_universe" as const,
+    qualityStatus: index % 9 === 0 ? ("warning" as const) : ("normal" as const),
+    collectionRangeDisplay: "2024-01-01부터 현재"
   }));
   const marketRows = instruments.slice(0, 50).map((instrument, index) => ({
     instrument,
@@ -289,7 +316,10 @@ export function demoSnapshot(): OperationsSnapshot {
     changeRate: `${(index % 7) / 100}`,
     tickerCollectedAt: now,
     orderbookCollectedAt: now,
-    qualityStatus: "normal" as const
+    qualityStatus: index % 13 === 0 ? ("warning" as const) : ("normal" as const),
+    coveragePercent: `${100 - (index % 6) * 1.6}`,
+    storageBytes: 24000000 - index * 120000,
+    storageBytesDisplay: `${(24 - index * 0.12).toFixed(1)}MB`
   }));
   const targetRows = instruments.slice(0, 50).map((instrument) => {
     const dataStatuses = [
@@ -405,9 +435,18 @@ export function demoSnapshot(): OperationsSnapshot {
       refreshedAt: now,
       totals: {
         activeTargets: 50,
+        activeTargetLimit: 50,
+        normalTargets: 47,
+        warningTargets: 2,
+        incidentTargets: 1,
         failedRuns24h: 0,
+        failureRate24h: "0.0018",
         delayedTargets: 0,
-        missingRangesOpen: 0
+        missingRangesOpen: 0,
+        storageBytesToday: 81388912640,
+        storageBytesTodayDisplay: "75.8GB",
+        recentRequestCount: 14200,
+        rateLimitRemainingPercent: "64"
       },
       coverage: [
         {
@@ -443,6 +482,32 @@ export function demoSnapshot(): OperationsSnapshot {
           status: "open",
           createdAt: now
         }
+      ],
+      healthChecks: [
+        {
+          title: "현재가·거래대금",
+          status: "normal",
+          statusLabel: "정상",
+          detail: "최근 1-3분 정상"
+        },
+        {
+          title: "캔들 상태",
+          status: "normal",
+          statusLabel: "정상",
+          detail: "직전 완성 1분봉 저장"
+        },
+        {
+          title: "호가 상태",
+          status: "normal",
+          statusLabel: "정상",
+          detail: "매수 잔량 우세"
+        },
+        {
+          title: "완전성 검사",
+          status: "warning",
+          statusLabel: "주의",
+          detail: "결측 1구간"
+        }
       ]
     },
     candidateEntries,
@@ -459,9 +524,12 @@ export function demoSnapshot(): OperationsSnapshot {
           progressPercent: "100",
           lastSuccessfulAt: now
         }
-      ]
+      ],
+      duplicateRows24h: 0,
+      tickerFreshnessLabel: "49초 전",
+      orderbookFreshnessLabel: "57초 전"
     },
-    candles: [],
+    candles: demoCandles("1000000"),
     backfillJobs: [],
     notifications: [
       {
@@ -476,4 +544,23 @@ export function demoSnapshot(): OperationsSnapshot {
     ],
     source: "fixture"
   };
+}
+
+function demoCandles(anchorPrice: string): Candle[] {
+  const base = Number(anchorPrice);
+  const start = Date.parse("2026-01-01T00:00:00.000Z");
+  return Array.from({ length: 96 }, (_, index) => {
+    const open = base + Math.sin(index / 7) * 2400 + index * 38;
+    const close = open + Math.cos(index / 5) * 1800;
+    return {
+      startedAt: new Date(start + index * 60_000).toISOString(),
+      open: `${Math.round(open)}`,
+      high: `${Math.round(Math.max(open, close) + 1200)}`,
+      low: `${Math.round(Math.min(open, close) - 1200)}`,
+      close: `${Math.round(close)}`,
+      volume: `${120 + index * 1.7}`,
+      tradeAmount: `${Math.round(close * (120 + index * 1.7))}`,
+      completeness: "complete"
+    };
+  });
 }

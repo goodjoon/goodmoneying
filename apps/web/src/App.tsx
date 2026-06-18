@@ -2,14 +2,26 @@ import {
   Activity,
   Bell,
   CheckCircle2,
+  CircleAlert,
+  Clock3,
   Database,
+  Download,
   LineChart,
   ListChecks,
   RefreshCcw,
+  Save,
   Search,
+  Settings2,
   X
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import {
+  CandlestickSeries,
+  ColorType,
+  createChart,
+  HistogramSeries,
+  type UTCTimestamp
+} from "lightweight-charts";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   QueryClient,
   QueryClientProvider,
@@ -20,33 +32,91 @@ import {
 import {
   createBackfillPlan,
   demoSnapshot,
-  JANUARY_2026_BACKFILL_END,
-  JANUARY_2026_BACKFILL_START,
   loadInstrumentSnapshot,
   loadOperationsSnapshot,
   updateCollectionTargets,
   type Candle,
   type CollectionDashboardTarget,
   type CoverageSegment,
-  type MarketListRow,
-  type OperationsSnapshot
+  type Instrument,
+  type OperationsSnapshot,
+  type Status
 } from "./api";
 
 type SectionId = "dashboard" | "targets" | "markets";
 
-const productNav = [
-  { label: "데이터 수집관리", icon: Activity, enabled: true },
-  { label: "종목 발굴", icon: Search, enabled: false },
-  { label: "매매 전략", icon: LineChart, enabled: false },
-  { label: "봇 관리", icon: RefreshCcw, enabled: false },
-  { label: "시스템 관리", icon: Database, enabled: false }
+const menuGroups: {
+  title: string;
+  items: { id?: SectionId; label: string; badge: string; enabled: boolean }[];
+}[] = [
+  {
+    title: "데이터 수집관리",
+    items: [
+      { id: "dashboard", label: "운영 상태", badge: "MVP", enabled: true },
+      { id: "targets", label: "수집 대상/설정", badge: "MVP", enabled: true },
+      { id: "markets", label: "시장 리스트", badge: "MVP", enabled: true },
+      { label: "코인 상세", badge: "MVP", enabled: false },
+      { label: "확장성 점검", badge: "MVP", enabled: false }
+    ]
+  },
+  {
+    title: "종목 발굴",
+    items: [
+      { label: "국내 주식 리스트", badge: "후속", enabled: false },
+      { label: "미국 주식 리스트", badge: "후속", enabled: false },
+      { label: "통합 시장 스캐닝", badge: "후속", enabled: false },
+      { label: "신호/이벤트 타임라인", badge: "후속", enabled: false }
+    ]
+  },
+  {
+    title: "매매 전략",
+    items: [
+      { label: "전략 작업대", badge: "후속", enabled: false },
+      { label: "백테스트", badge: "후속", enabled: false },
+      { label: "지표 기여도", badge: "후속", enabled: false },
+      { label: "호가 재생 제약", badge: "후속", enabled: false }
+    ]
+  },
+  {
+    title: "봇 관리",
+    items: [
+      { label: "봇 설계", badge: "후속", enabled: false },
+      { label: "전략 파이프라인", badge: "후속", enabled: false },
+      { label: "시뮬레이션", badge: "후속", enabled: false },
+      { label: "모의매매 준비", badge: "후속", enabled: false }
+    ]
+  },
+  {
+    title: "시스템 관리",
+    items: [
+      { label: "보존 정책", badge: "후속", enabled: false },
+      { label: "감사 로그", badge: "후속", enabled: false },
+      { label: "알림 이벤트", badge: "후속", enabled: false },
+      { label: "토큰 설정", badge: "후속", enabled: false }
+    ]
+  }
 ];
 
-const sections: { id: SectionId; label: string; icon: typeof Activity }[] = [
-  { id: "dashboard", label: "운영 상태 대시보드", icon: Activity },
-  { id: "targets", label: "수집 대상 설정", icon: ListChecks },
-  { id: "markets", label: "시장 리스트", icon: Search }
-];
+const sectionMeta: Record<SectionId, { crumb: string; milestone: string; title: string; desc: string }> = {
+  dashboard: {
+    crumb: "goodmoneying / 운영 상태 / M1",
+    milestone: "M1 · 운영 관제형",
+    title: "업비트 수집 운영 상태",
+    desc: "수집 대상 최대 50개 코인의 최신성, 지연, 결측, 실패, 저장량을 한 화면에서 확인하는 고밀도 운영 콘솔"
+  },
+  targets: {
+    crumb: "goodmoneying / 수집 대상/설정 / M2",
+    milestone: "M2 · 운영 관제형",
+    title: "수집 대상과 백필 설정",
+    desc: "상위 100개 후보 중 활성 수집 대상 최대 50개를 조정하고 백필 계획을 승인합니다."
+  },
+  markets: {
+    crumb: "goodmoneying / 시장 리스트 / M2",
+    milestone: "M2 · 운영 관제형",
+    title: "시장 리스트",
+    desc: "수집 대상 코인의 현재가, 거래대금, 등락률, 최신성, 커버리지와 저장량을 비교합니다."
+  }
+};
 
 export function App() {
   const [queryClient] = useState(() => new QueryClient());
@@ -65,23 +135,21 @@ function OperationsApp() {
   const [isDetailOpen, setDetailOpen] = useState(false);
   const query = useQuery({
     queryKey: ["operations"],
-    queryFn: () => (import.meta.env.MODE === "test" ? Promise.resolve(demoSnapshot()) : loadOperationsSnapshot()),
+    queryFn: () =>
+      import.meta.env.MODE === "test" ? Promise.resolve(demoSnapshot()) : loadOperationsSnapshot(),
     refetchInterval: activeSection === "dashboard" ? 15_000 : false
   });
 
   useEffect(() => {
-    if (query.data) {
-      setSnapshot(query.data);
-      setSelectedInstrumentId((current) => current ?? query.data.detail.instrument.id);
-    }
+    if (!query.data) return;
+    setSnapshot(query.data);
+    setSelectedInstrumentId((current) => current ?? query.data.detail.instrument.id);
   }, [query.data]);
 
   const openInstrumentDetail = async (instrumentId: number) => {
     setSelectedInstrumentId(instrumentId);
     setDetailOpen(true);
-    if (!snapshot || snapshot.detail.instrument.id === instrumentId) {
-      return;
-    }
+    if (!snapshot || snapshot.detail.instrument.id === instrumentId) return;
     if (import.meta.env.MODE === "test") {
       setSnapshot(selectDemoInstrument(snapshot, instrumentId));
       return;
@@ -100,59 +168,77 @@ function OperationsApp() {
     return <main className="app-shell loading-state">운영 상태를 불러오는 중</main>;
   }
 
+  const meta = sectionMeta[activeSection];
+
   return (
     <main className="app-shell app-layout" data-theme="dark">
       <aside className="sidebar" aria-label="제품 메뉴">
         <div className="brand-block">
-          <strong>goodmoneying</strong>
-          <span>개인 투자 데이터 플랫폼</span>
+          <div className="brand-mark">gm</div>
+          <div>
+            <strong>goodmoneying</strong>
+            <span>운영 관제형</span>
+          </div>
         </div>
+        <nav className="top-product-nav" aria-label="제품 영역">
+          <button className="active" type="button">데이터 수집관리</button>
+          <button type="button" disabled>종목 발굴</button>
+          <button type="button" disabled>매매 전략</button>
+          <button type="button" disabled>봇 관리</button>
+          <button type="button" disabled>시스템 관리</button>
+        </nav>
         <nav className="product-nav">
-          {productNav.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.label}
-                className={item.enabled ? "active" : ""}
-                type="button"
-                disabled={!item.enabled}
-              >
-                <Icon size={18} />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
+          {menuGroups.map((group) => (
+            <section key={group.title}>
+              <h2>{group.title}</h2>
+              {group.items.map((item) => (
+                <button
+                  key={`${group.title}-${item.label}`}
+                  className={item.id === activeSection ? "active" : ""}
+                  type="button"
+                  aria-label={item.label.replace("/", " ")}
+                  disabled={!item.enabled}
+                  onClick={() => item.id && setActiveSection(item.id)}
+                >
+                  <span>{item.label}</span>
+                  <em>{item.badge}</em>
+                </button>
+              ))}
+            </section>
+          ))}
         </nav>
       </aside>
 
       <section className="workspace">
-        <header className="topbar">
-          <div>
-            <p className="eyebrow">데이터 수집관리</p>
-            <h1>{sections.find((item) => item.id === activeSection)?.label}</h1>
-          </div>
-          <div className={`status-pill ${snapshot.dashboard.status}`}>
-            <CheckCircle2 size={18} />
-            <span>{statusText(snapshot.dashboard.status)}</span>
+        <header className="workspace-header">
+          <div className="breadcrumb">{meta.crumb}</div>
+          <div className="header-actions">
+            <button type="button" aria-label="새로고침" onClick={() => query.refetch()}>
+              <RefreshCcw size={16} />
+              새로고침
+            </button>
+            <button type="button" aria-label="CSV 내보내기">
+              <Download size={16} />
+              CSV 내보내기
+            </button>
+            <button type="button" className="primary-action" aria-label="운영 변경 저장">
+              <Save size={16} />
+              운영 변경 저장
+            </button>
           </div>
         </header>
 
-        <nav className="section-tabs" aria-label="데이터 수집관리 화면">
-          {sections.map((section) => {
-            const Icon = section.icon;
-            return (
-              <button
-                key={section.id}
-                className={activeSection === section.id ? "active" : ""}
-                type="button"
-                onClick={() => setActiveSection(section.id)}
-              >
-                <Icon size={18} />
-                <span>{section.label}</span>
-              </button>
-            );
-          })}
-        </nav>
+        <section className="hero-row">
+          <div>
+            <p className="eyebrow">{meta.milestone}</p>
+            <h1>{meta.title}</h1>
+            <p className="page-desc">{meta.desc}</p>
+          </div>
+          <div className="runtime-pills" aria-label="화면 갱신 기준">
+            <span>표시 KST</span>
+            <span>폴링 10-30초</span>
+          </div>
+        </section>
 
         {activeSection === "dashboard" ? <Dashboard snapshot={snapshot} /> : null}
         {activeSection === "targets" ? <Targets snapshot={snapshot} /> : null}
@@ -165,70 +251,87 @@ function OperationsApp() {
         ) : null}
       </section>
 
-      {isDetailOpen ? (
-        <DetailModal snapshot={snapshot} onClose={() => setDetailOpen(false)} />
-      ) : null}
+      {isDetailOpen ? <DetailModal snapshot={snapshot} onClose={() => setDetailOpen(false)} /> : null}
     </main>
   );
 }
 
 function Dashboard({ snapshot }: { snapshot: OperationsSnapshot }) {
   const totals = snapshot.dashboard.totals;
-  const [expandedId, setExpandedId] = useState<number | null>(null);
   return (
-    <section className="page-grid">
+    <section className="dashboard-page">
       <div className="metric-band">
-        <Metric label="활성 수집 대상" value={totals.activeTargets.toString()} />
-        <Metric label="24시간 실패 실행" value={totals.failedRuns24h.toString()} tone="danger" />
-        <Metric label="지연 대상" value={totals.delayedTargets.toString()} tone="warning" />
-        <Metric label="열린 결측 구간" value={totals.missingRangesOpen.toString()} />
+        <Metric label="활성 수집 대상" value={`${totals.activeTargets}/${totals.activeTargetLimit}`} hint="상위 100 후보 기준" />
+        <Metric label="정상 수집" value={totals.normalTargets.toString()} hint="최근 3분 이내" />
+        <Metric
+          label="주의/장애"
+          value={`${totals.warningTargets}/${totals.incidentTargets}`}
+          hint="결측 복구 필요"
+          tone={totals.warningTargets || totals.incidentTargets ? "warning" : "default"}
+        />
+        <Metric label="오늘 저장량" value={totals.storageBytesTodayDisplay} hint="원천·상태 합산" />
+        <Metric
+          label="실패율"
+          value={formatPercent(totals.failureRate24h)}
+          hint="최근 24시간"
+          tone={Number(totals.failureRate24h) > 0 ? "danger" : "default"}
+        />
       </div>
+
+      <section className="panel trend-panel">
+        <div className="panel-heading">
+          <h2>구간형 수집 진행 상태</h2>
+          <TimeInline value="KST 전일 23:59:59 기준" zone="KST" />
+        </div>
+        <OperationalTrendChart targets={snapshot.dashboard.targets} />
+        <div className="mini-metrics">
+          <MiniMetric label="결측 구간" value={totals.missingRangesOpen.toString()} detail="캔들 결측 기준" />
+          <MiniMetric label="백필 대기" value={snapshot.backfillJobs.length.toString()} detail={`예상 요청 ${totals.recentRequestCount.toLocaleString("ko-KR")}`} />
+          <MiniMetric label="Rate limit 여유" value={`${totals.rateLimitRemainingPercent}%`} detail="전역 제한기 정상" />
+        </div>
+      </section>
+
+      <section className="panel health-panel">
+        <div className="panel-heading">
+          <h2>운영 헬스</h2>
+          <Bell size={18} />
+        </div>
+        <div className="health-list">
+          {snapshot.dashboard.healthChecks.map((check) => (
+            <article className="health-item" key={check.title}>
+              <span>{check.title}</span>
+              <strong className={check.status}>{check.statusLabel}</strong>
+              <em>{check.detail}</em>
+            </article>
+          ))}
+        </div>
+      </section>
+
       <section className="panel full">
         <div className="panel-heading">
           <h2>코인별 수집 상태</h2>
           <span>{snapshot.dashboard.targets.length}개</span>
         </div>
-        <div className="dashboard-list">
-          {snapshot.dashboard.targets.map((target) => (
-            <CollectionTargetRow
-              key={target.instrument.id}
-              target={target}
-              expanded={expandedId === target.instrument.id}
-              onToggle={() =>
-                setExpandedId((current) =>
-                  current === target.instrument.id ? null : target.instrument.id
-                )
-              }
-            />
+        <div className="dashboard-table">
+          <div className="dashboard-table-head">
+            <span>코인</span>
+            <span>상태</span>
+            <span>최근성</span>
+            <span>커버리지</span>
+            <span>데이터 상태</span>
+          </div>
+          {snapshot.dashboard.targets.slice(0, 8).map((target) => (
+            <CollectionTargetRow key={target.instrument.id} target={target} />
           ))}
         </div>
-      </section>
-      <section className="panel full">
-        <div className="panel-heading">
-          <h2>알림 이벤트</h2>
-          <Bell size={18} />
-        </div>
-        {snapshot.notifications.map((item) => (
-          <article className="event-item" key={item.id}>
-            <strong>{item.title}</strong>
-            <span>{item.message}</span>
-          </article>
-        ))}
       </section>
     </section>
   );
 }
 
-function CollectionTargetRow({
-  target,
-  expanded,
-  onToggle
-}: {
-  target: CollectionDashboardTarget;
-  expanded: boolean;
-  onToggle: () => void;
-}) {
+function CollectionTargetRow({ target }: { target: CollectionDashboardTarget }) {
   const queryClient = useQueryClient();
+  const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const backfillPlan = useMutation({
     mutationFn: () => createBackfillPlan([target.instrument.id]),
@@ -239,15 +342,16 @@ function CollectionTargetRow({
   );
   return (
     <article className={`accordion-row ${expanded ? "expanded" : ""}`}>
-      <button className="accordion-summary" type="button" onClick={onToggle}>
-        <strong>{target.instrument.marketCode}</strong>
-        <span>{target.instrument.displayName}</span>
+      <button
+        className="dashboard-row-button"
+        type="button"
+        onClick={() => setExpanded((current) => !current)}
+      >
+        <InstrumentName instrument={target.instrument} />
         <span className={`quality ${target.overallStatus === "latest_collecting" ? "normal" : "warning"}`}>
           {target.overallStatusLabel}
         </span>
-        <span>{target.plan.displayRange}</span>
-        <TimeBadge value={target.plan.rangeTimeZone} />
-        <TimeBadge value="UTC" />
+        <TimeInline value={formatFreshness(target.plan.rangeStartAt)} zone={target.plan.rangeTimeZone} />
         <CoverageBar segments={candleSegments} />
         <span className="mini-statuses">
           {target.dataStatuses.map((status) => (
@@ -297,7 +401,7 @@ function CollectionTargetRow({
                 </button>
               </div>
               <p className="helper-text">
-                코인별 수집 계획 안에서 안전 재시작 중심으로 백필을 실행합니다.
+                기존 데이터를 삭제하지 않는 안전 재시작(Safe Restart) 기준으로 백필 계획을 만듭니다.
               </p>
             </section>
           </div>
@@ -314,7 +418,8 @@ function CollectionTargetRow({
                   )}
                 />
                 <span>
-                  결측 {status.missingSegmentCount}개 · 마지막 성공 {formatFreshness(status.lastSuccessfulAt)}
+                  결측 {status.missingSegmentCount}개 · 마지막 성공{" "}
+                  {formatFreshness(status.lastSuccessfulAt)}
                 </span>
               </article>
             ))}
@@ -388,36 +493,62 @@ function Targets({ snapshot }: { snapshot: OperationsSnapshot }) {
     });
   };
   return (
-    <section className="panel full">
-      <div className="panel-heading">
-        <h2>후보 유니버스 상위 100개</h2>
-        <div className="heading-actions">
-          <span>선택 {selected}/최대 50</span>
-          <button
-            type="button"
-            disabled={!canSave}
-            onClick={() => mutation.mutate(Array.from(selectedIds))}
-          >
+    <section className="split-page">
+      <section className="panel">
+        <div className="panel-heading">
+          <h2>후보 유니버스 상위 100개</h2>
+          <span>선택 {selected}/50</span>
+        </div>
+        <div className="target-toolbar">
+          <label>
+            <Search size={16} />
+            <input placeholder="코인명 또는 심볼 검색" />
+          </label>
+          <select defaultValue="trade">
+            <option value="trade">거래대금순</option>
+            <option value="quality">품질순</option>
+          </select>
+          <button type="button" disabled={!canSave} onClick={() => mutation.mutate(Array.from(selectedIds))}>
             <CheckCircle2 size={16} />
             저장
           </button>
         </div>
-      </div>
-      {mutation.isError ? <p className="error-text">수집 대상 저장에 실패했습니다.</p> : null}
-      <div className="target-grid">
-        {snapshot.candidateEntries.slice(0, 100).map((entry) => (
-          <label className="target-item" key={entry.instrument.id}>
-            <input
-              type="checkbox"
-              checked={selectedIds.has(entry.instrument.id)}
-              onChange={() => toggle(entry.instrument.id)}
-            />
-            <span>{entry.rank}</span>
-            <strong>{entry.instrument.marketCode}</strong>
-            <em>{formatNumber(entry.accTradePrice24h)}</em>
-          </label>
-        ))}
-      </div>
+        {mutation.isError ? <p className="error-text">수집 대상 저장에 실패했습니다.</p> : null}
+        <div className="target-table">
+          <div className="target-table-head">
+            <span>활성</span>
+            <span>후보</span>
+            <span>거래대금</span>
+            <span>품질</span>
+            <span>수집 범위</span>
+          </div>
+          {snapshot.candidateEntries.slice(0, 100).map((entry) => (
+            <label className="target-row" key={entry.instrument.id}>
+              <span>
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(entry.instrument.id)}
+                  onChange={() => toggle(entry.instrument.id)}
+                />
+                수집
+              </span>
+              <InstrumentName instrument={entry.instrument} />
+              <strong>{entry.accTradePrice24hDisplay}</strong>
+              <em className={`quality ${entry.qualityStatus}`}>{statusText(entry.qualityStatus)}</em>
+              <span>{entry.collectionRangeDisplay}</span>
+            </label>
+          ))}
+        </div>
+      </section>
+      <section className="panel side-panel">
+        <div className="panel-heading">
+          <h2>백필 승인 패널</h2>
+          <Settings2 size={18} />
+        </div>
+        <MiniMetric label="예상 요청 수" value="18,420" detail="1분 캔들 + 일봉 보정" />
+        <MiniMetric label="예상 저장량" value="12.6GB" detail="삭제 후 재수집 없음" />
+        <MiniMetric label="감사 로그" value="필수" detail="대상 변경·범위 변경 기록" />
+      </section>
     </section>
   );
 }
@@ -443,7 +574,9 @@ function Markets({
           <span>현재가</span>
           <span>24시간 거래대금</span>
           <span>등락률</span>
-          <span>캔들 최신성</span>
+          <span>최신성</span>
+          <span>커버리지</span>
+          <span>저장량</span>
           <span>품질</span>
         </div>
         {snapshot.marketRows.map((row) => (
@@ -455,13 +588,15 @@ function Markets({
             type="button"
             onClick={() => onSelectInstrument(row.instrument.id)}
           >
-            <strong>{row.instrument.marketCode}</strong>
+            <InstrumentName instrument={row.instrument} />
             <span>{formatNumber(row.tradePrice)}</span>
             <span>{row.accTradePrice24hDisplay}</span>
             <span className={Number(row.changeRate) >= 0 ? "change up" : "change down"}>
               {formatPercent(row.changeRate)}
             </span>
-            <span>{formatFreshness(row.tickerCollectedAt)}</span>
+            <TimeInline value={formatFreshness(row.tickerCollectedAt)} zone="KST" />
+            <CoverageMeter value={row.coveragePercent} />
+            <span>{row.storageBytesDisplay}</span>
             <span className={`quality ${row.qualityStatus}`}>{statusText(row.qualityStatus)}</span>
           </button>
         ))}
@@ -490,46 +625,162 @@ function DetailModal({
 }
 
 function Detail({ snapshot }: { snapshot: OperationsSnapshot }) {
-  const candles = useMemo(() => sampleCandles(snapshot.candles, 96), [snapshot.candles]);
-  const maxClose = Math.max(...candles.map((item) => Number(item.close)), 1);
+  const candles = useMemo(() => sampleCandles(snapshot.candles, 180), [snapshot.candles]);
+  const instrument = snapshot.detail.instrument;
   return (
-    <section className="page-grid two detail-surface">
-      <section className="panel">
+    <section className="detail-page">
+      <h2 className="detail-title"><InstrumentTitle instrument={instrument} /></h2>
+      <section className="panel chart-panel">
         <div className="panel-heading">
-          <h2>{snapshot.detail.instrument.marketCode}</h2>
-          <span>{snapshot.detail.instrument.displayName}</span>
-        </div>
-        <dl className="definition-list">
-          <div>
-            <dt>현재가</dt>
-            <dd>{formatNumber(snapshot.detail.latestTicker.tradePrice)}</dd>
-          </div>
-          <div>
-            <dt>거래대금</dt>
-            <dd>{formatNumber(snapshot.detail.latestTicker.accTradePrice24h)}</dd>
-          </div>
-          <div>
-            <dt>스프레드</dt>
-            <dd>{snapshot.detail.latestOrderbook.spread}</dd>
-          </div>
-          <div>
-            <dt>호가 불균형</dt>
-            <dd>{snapshot.detail.latestOrderbook.imbalance10}</dd>
-          </div>
-        </dl>
-      </section>
-      <section className="panel">
-        <div className="panel-heading">
-          <h2>캔들 흐름</h2>
+          <h2><InstrumentTitle instrument={instrument} /> 캔들·거래대금</h2>
           <span>2026년 1월 1분봉</span>
         </div>
-        <p className="chart-meta">
-          UTC 기준 2026-01-01 00:00 ~ 2026-02-01 00:00 · 표시 {candles.length}개 / 저장{" "}
-          {snapshot.candles.length}개
-        </p>
-        <CandleChart candles={candles} maxClose={maxClose} />
+        <TradingViewCandleChart
+          candles={candles}
+          instrument={instrument}
+          currentPrice={snapshot.detail.latestTicker.tradePrice}
+        />
+        <div className="detail-stats">
+          <MiniMetric label="현재가" value={`₩${formatNumber(snapshot.detail.latestTicker.tradePrice)}`} detail={snapshot.detail.tickerFreshnessLabel} />
+          <MiniMetric label="거래대금" value={formatNumber(snapshot.detail.latestTicker.accTradePrice24h)} detail="소수점 생략" />
+          <MiniMetric label="중복 행" value={snapshot.detail.duplicateRows24h.toString()} detail="최근 24시간" />
+        </div>
+      </section>
+      <section className="panel orderbook-panel">
+        <div className="panel-heading">
+          <h2>호가 요약</h2>
+          <TimeInline value={snapshot.detail.orderbookFreshnessLabel} zone="KST" />
+        </div>
+        <div className="orderbook-grid">
+          <MiniMetric label="최우선 매수" value={formatNumber(snapshot.detail.latestOrderbook.bestBidPrice)} detail={`수량 ${snapshot.detail.latestOrderbook.bestBidSize} ${instrument.baseAsset}`} />
+          <MiniMetric label="최우선 매도" value={formatNumber(snapshot.detail.latestOrderbook.bestAskPrice)} detail={`수량 ${snapshot.detail.latestOrderbook.bestAskSize} ${instrument.baseAsset}`} />
+          <MiniMetric label="스프레드" value={`${snapshot.detail.latestOrderbook.spread}`} detail="정상 범위" />
+          <MiniMetric label="호가 불균형" value={formatPercent(snapshot.detail.latestOrderbook.imbalance10)} detail="매수 잔량 우세" />
+        </div>
       </section>
     </section>
+  );
+}
+
+function TradingViewCandleChart({
+  candles,
+  instrument,
+  currentPrice
+}: {
+  candles: Candle[];
+  instrument: Instrument;
+  currentPrice: string;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!containerRef.current || candles.length === 0 || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const container = containerRef.current;
+    const chart = createChart(container, {
+      width: container.clientWidth || 900,
+      height: 328,
+      layout: {
+        background: { type: ColorType.Solid, color: "#0c1010" },
+        textColor: "#9ca7a0"
+      },
+      grid: {
+        vertLines: { color: "rgba(148, 163, 184, 0.12)" },
+        horzLines: { color: "rgba(148, 163, 184, 0.12)" }
+      },
+      rightPriceScale: { borderColor: "rgba(148, 163, 184, 0.2)" },
+      timeScale: { borderColor: "rgba(148, 163, 184, 0.2)", timeVisible: true }
+    });
+    const candleSeries = chart.addSeries(CandlestickSeries, {
+      upColor: "#22c7a5",
+      downColor: "#ff4d5a",
+      borderVisible: false,
+      wickUpColor: "#22c7a5",
+      wickDownColor: "#ff4d5a"
+    });
+    candleSeries.setData(
+      candles.map((item) => ({
+        time: Math.floor(new Date(item.startedAt).getTime() / 1000) as UTCTimestamp,
+        open: Number(item.open),
+        high: Number(item.high),
+        low: Number(item.low),
+        close: Number(item.close)
+      }))
+    );
+    const volumeSeries = chart.addSeries(HistogramSeries, {
+      priceFormat: { type: "volume" },
+      priceScaleId: "volume"
+    });
+    volumeSeries.setData(
+      candles.map((item) => ({
+        time: Math.floor(new Date(item.startedAt).getTime() / 1000) as UTCTimestamp,
+        value: Number(item.volume),
+        color: Number(item.close) >= Number(item.open) ? "rgba(34, 199, 165, 0.42)" : "rgba(255, 77, 90, 0.42)"
+      }))
+    );
+    chart.priceScale("volume").applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
+    chart.timeScale().fitContent();
+    const observer = new ResizeObserver(([entry]) => {
+      chart.applyOptions({ width: Math.floor(entry.contentRect.width) });
+    });
+    observer.observe(container);
+    return () => {
+      observer.disconnect();
+      chart.remove();
+    };
+  }, [candles]);
+
+  return (
+    <div className="trading-chart-shell" aria-label="TradingView 캔들 차트">
+      <div className="chart-titlebar">
+        <span>{instrument.baseAsset} / {instrument.quoteCurrency} · 1분 · UpBit</span>
+        <strong>{formatNumber(currentPrice)}</strong>
+      </div>
+      <div className="chart-canvas" ref={containerRef}>
+        {candles.length === 0 ? <span>선택한 기간에 저장된 캔들이 없습니다.</span> : null}
+      </div>
+      <div className="price-gauge">
+        <span>현재가 게이지</span>
+        <strong>{formatNumber(currentPrice)}</strong>
+      </div>
+      <div className="volume-gauge">
+        <span>거래량 게이지</span>
+        <strong>{candles.length > 0 ? formatNumber(candles.at(-1)?.volume ?? "0") : "0"}</strong>
+      </div>
+      <div className="trading-watermark">TradingView Lightweight Charts</div>
+    </div>
+  );
+}
+
+function OperationalTrendChart({ targets }: { targets: CollectionDashboardTarget[] }) {
+  const points = targets.slice(0, 12).map((target, index) => ({
+    x: 24 + index * 76,
+    y: 150 - Number(target.dataStatuses[0]?.progressPercent ?? 0) * 0.9
+  }));
+  const line = points.map((point) => `${point.x},${point.y}`).join(" ");
+  return (
+    <div className="ops-chart" aria-label="구간형 수집 진행 상태 차트">
+      <svg viewBox="0 0 900 220" role="img">
+        <defs>
+          <linearGradient id="coverage-fill" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#24d6a2" stopOpacity="0.35" />
+            <stop offset="100%" stopColor="#24d6a2" stopOpacity="0.03" />
+          </linearGradient>
+        </defs>
+        {Array.from({ length: 8 }, (_, index) => (
+          <line key={`v-${index}`} x1={40 + index * 110} x2={40 + index * 110} y1="18" y2="198" />
+        ))}
+        {Array.from({ length: 4 }, (_, index) => (
+          <line key={`h-${index}`} x1="20" x2="880" y1={40 + index * 46} y2={40 + index * 46} />
+        ))}
+        <polyline points={`20,190 ${line} 880,86 880,198 20,198`} className="area" />
+        <polyline points={line} className="line primary" />
+        <polyline points={points.map((point) => `${point.x},${point.y + 34}`).join(" ")} className="line secondary" />
+        <circle cx="690" cy="82" r="7" className="dot warning" />
+        <circle cx="820" cy="92" r="7" className="dot danger" />
+      </svg>
+      <span>녹색=수집 커버리지, 파랑=저장량, 점=주의/장애 구간</span>
+    </div>
   );
 }
 
@@ -541,80 +792,71 @@ function CoverageBar({ segments }: { segments: CoverageSegment[] }) {
           className={`coverage-segment ${segment.status}`}
           key={`${segment.dataType}-${segment.status}-${index}`}
           title={segment.label}
-          style={{
-            left: `${segment.offsetPercent}%`,
-            width: `${segment.widthPercent}%`
-          }}
+          style={{ left: `${segment.offsetPercent}%`, width: `${segment.widthPercent}%` }}
         />
       ))}
     </div>
   );
 }
 
-function TimeBadge({ value }: { value: "KST" | "UTC" }) {
-  return <span className={`time-badge ${value.toLowerCase()}`}>{value}</span>;
+function CoverageMeter({ value }: { value: string }) {
+  const numeric = Math.max(0, Math.min(100, Number(value)));
+  return (
+    <span className="coverage-meter">
+      <span style={{ width: `${numeric}%` }} />
+      <em>{numeric.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%</em>
+    </span>
+  );
 }
 
-function CandleChart({ candles, maxClose }: { candles: Candle[]; maxClose: number }) {
-  if (candles.length === 0) {
-    return (
-      <div className="candle-chart empty" aria-label="캔들 차트">
-        <span>선택한 기간에 저장된 캔들이 없습니다.</span>
-      </div>
-    );
-  }
-  const high = Math.max(...candles.map((item) => Number(item.high)), maxClose);
-  const low = Math.min(...candles.map((item) => Number(item.low)));
-  const range = Math.max(high - low, 1);
-  const width = Math.max(560, candles.length * 12);
-  const height = 240;
-  const plotTop = 18;
-  const plotBottom = height - 34;
-  const y = (value: number) => plotBottom - ((value - low) / range) * (plotBottom - plotTop);
-  const step = width / candles.length;
+function InstrumentName({ instrument }: { instrument: Instrument }) {
   return (
-    <div className="candle-chart" aria-label="캔들 차트">
-      <svg viewBox={`0 0 ${width} ${height}`} role="img">
-        {candles.map((item, index) => {
-          const x = index * step + step / 2;
-          const open = Number(item.open);
-          const close = Number(item.close);
-          const candleHigh = Number(item.high);
-          const candleLow = Number(item.low);
-          const rising = close >= open;
-          const bodyTop = y(Math.max(open, close));
-          const bodyHeight = Math.max(2, Math.abs(y(open) - y(close)));
-          return (
-            <g key={item.startedAt} className={rising ? "candle up" : "candle down"}>
-              <line x1={x} x2={x} y1={y(candleHigh)} y2={y(candleLow)} />
-              <rect
-                x={x - Math.max(3, step * 0.28)}
-                y={bodyTop}
-                width={Math.max(6, step * 0.56)}
-                height={bodyHeight}
-                rx="2"
-              />
-            </g>
-          );
-        })}
-      </svg>
-    </div>
+    <span className="instrument-name">
+      <strong>{instrument.baseAsset} / {instrument.quoteCurrency}</strong>
+      <em>{instrument.displayName}</em>
+    </span>
+  );
+}
+
+function InstrumentTitle({ instrument }: { instrument: Instrument }) {
+  return <>{instrument.baseAsset} / {instrument.quoteCurrency}</>;
+}
+
+function TimeInline({ value, zone }: { value: string; zone: "KST" | "UTC" }) {
+  return (
+    <span className="time-inline">
+      {value}
+      <em>{zone}</em>
+    </span>
   );
 }
 
 function Metric({
   label,
   value,
+  hint,
   tone = "default"
 }: {
   label: string;
   value: string;
+  hint: string;
   tone?: "default" | "warning" | "danger";
 }) {
   return (
     <article className={`metric ${tone}`}>
       <span>{label}</span>
       <strong>{value}</strong>
+      <em>{hint}</em>
+    </article>
+  );
+}
+
+function MiniMetric({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return (
+    <article className="mini-metric">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <em>{detail}</em>
     </article>
   );
 }
@@ -627,9 +869,7 @@ function statusText(status: string) {
 }
 
 function sampleCandles(candles: Candle[], maxCount: number) {
-  if (candles.length <= maxCount) {
-    return candles;
-  }
+  if (candles.length <= maxCount) return candles;
   const step = candles.length / maxCount;
   return Array.from({ length: maxCount }, (_, index) => candles[Math.floor(index * step)]).filter(
     Boolean
@@ -638,12 +878,11 @@ function sampleCandles(candles: Candle[], maxCount: number) {
 
 function selectDemoInstrument(snapshot: OperationsSnapshot, instrumentId: number) {
   const row = snapshot.marketRows.find((item) => item.instrument.id === instrumentId);
-  if (!row) {
-    return snapshot;
-  }
+  if (!row) return snapshot;
   return {
     ...snapshot,
     detail: {
+      ...snapshot.detail,
       instrument: row.instrument,
       latestTicker: {
         ...snapshot.detail.latestTicker,
@@ -652,10 +891,9 @@ function selectDemoInstrument(snapshot: OperationsSnapshot, instrumentId: number
         changeRate: row.changeRate,
         collectedAt: row.tickerCollectedAt
       },
-      latestOrderbook: snapshot.detail.latestOrderbook,
       coverage: snapshot.dashboard.coverage.filter((item) => item.instrumentId === instrumentId)
     },
-    candles: []
+    candles: demoCandles(row.tradePrice)
   };
 }
 
@@ -676,5 +914,24 @@ function formatFreshness(value: string) {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit"
+  });
+}
+
+function demoCandles(anchorPrice: string): Candle[] {
+  const base = Number(anchorPrice);
+  const start = Date.parse("2026-01-01T00:00:00.000Z");
+  return Array.from({ length: 96 }, (_, index) => {
+    const open = base + Math.sin(index / 7) * 2400 + index * 38;
+    const close = open + Math.cos(index / 5) * 1800;
+    return {
+      startedAt: new Date(start + index * 60_000).toISOString(),
+      open: `${Math.round(open)}`,
+      high: `${Math.round(Math.max(open, close) + 1200)}`,
+      low: `${Math.round(Math.min(open, close) - 1200)}`,
+      close: `${Math.round(close)}`,
+      volume: `${120 + index * 1.7}`,
+      tradeAmount: `${Math.round(close * (120 + index * 1.7))}`,
+      completeness: "complete"
+    };
   });
 }

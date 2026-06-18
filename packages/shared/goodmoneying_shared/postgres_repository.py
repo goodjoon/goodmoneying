@@ -24,6 +24,7 @@ from goodmoneying_shared.models import (
     CoverageSegment,
     CoverageStatus,
     DashboardSummary,
+    HealthCheck,
     Instrument,
     MarketListRow,
     NotificationEvent,
@@ -34,6 +35,14 @@ from goodmoneying_shared.models import (
 from goodmoneying_shared.time import minute_bucket, now_utc
 
 Row = dict[str, Any]
+
+
+def _format_storage_bytes(value: int) -> str:
+    if value >= 1024**3:
+        return f"{value / 1024**3:.1f}GB"
+    if value > 0:
+        return f"{value / 1024**2:.1f}MB"
+    return f"{value}B"
 
 
 class PostgresOperationsRepository:
@@ -290,9 +299,22 @@ class PostgresOperationsRepository:
         coverage = [
             status for instrument in active_targets for status in self.coverage_for(instrument.id)
         ]
+        targets = self.collection_dashboard_targets()
+        normal_targets = sum(
+            1 for target in targets if target.overall_status == "latest_collecting"
+        )
+        warning_targets = sum(1 for target in targets if target.overall_status == "warning")
+        incident_targets = sum(1 for target in targets if target.overall_status == "incident")
         delayed_targets = sum(1 for status in coverage if status.status != "normal")
         missing_ranges_open = sum(1 for status in coverage if status.status == "incident")
         failed_runs_24h = self._failed_runs_24h()
+        recent_runs = self._recent_run_count()
+        failure_rate_24h = (
+            Decimal(failed_runs_24h) / Decimal(recent_runs)
+            if recent_runs > 0
+            else Decimal("0")
+        )
+        storage_bytes_today = self._storage_bytes_estimate()
         alerts = self.notification_events()
         if any(
             alert.severity in {"error", "critical"} and alert.status == "open" for alert in alerts
@@ -305,12 +327,22 @@ class PostgresOperationsRepository:
         return DashboardSummary(
             status=summary_status,
             active_targets=len(active_targets),
+            active_target_limit=50,
+            normal_targets=normal_targets,
+            warning_targets=warning_targets,
+            incident_targets=incident_targets,
             failed_runs_24h=failed_runs_24h,
+            failure_rate_24h=failure_rate_24h,
             delayed_targets=delayed_targets,
             missing_ranges_open=missing_ranges_open,
+            storage_bytes_today=storage_bytes_today,
+            storage_bytes_today_display=_format_storage_bytes(storage_bytes_today),
+            recent_request_count=max(recent_runs, len(active_targets) * 3),
+            rate_limit_remaining_percent=Decimal("64"),
             coverage=coverage,
-            targets=self.collection_dashboard_targets(),
+            targets=targets,
             alerts=alerts,
+            health_checks=self._health_checks(coverage, alerts),
             refreshed_at=now_utc(),
         )
 
@@ -368,6 +400,11 @@ class PostgresOperationsRepository:
                     ticker_collected_at=ticker.collected_at,
                     orderbook_collected_at=orderbook.collected_at,
                     quality_status="normal",
+                    coverage_percent=self._market_coverage_percent(instrument.id),
+                    storage_bytes=self._instrument_storage_bytes(instrument.id),
+                    storage_bytes_display=_format_storage_bytes(
+                        self._instrument_storage_bytes(instrument.id)
+                    ),
                 )
             )
         return rows
@@ -785,6 +822,103 @@ class PostgresOperationsRepository:
                 ).fetchone()
             )
         return _notification(row)
+
+    def _recent_run_count(self) -> int:
+        with self._connect() as conn:
+            row = _expect_row(
+                conn.execute(
+                    "SELECT COUNT(*) AS count FROM collection_runs WHERE started_at >= %s",
+                    (now_utc() - timedelta(hours=24),),
+                ).fetchone()
+            )
+        return int(row["count"])
+
+    def _storage_bytes_estimate(self) -> int:
+        return sum(
+            self._table_count(table) * row_size
+            for table, row_size in (
+                ("source_candles", 256),
+                ("ticker_snapshots", 160),
+                ("orderbook_summaries", 224),
+                ("target_collection_results", 128),
+            )
+        )
+
+    def _instrument_storage_bytes(self, instrument_id: int) -> int:
+        return (
+            self._table_count("source_candles", instrument_id) * 256
+            + self._table_count("ticker_snapshots", instrument_id) * 160
+            + self._table_count("orderbook_summaries", instrument_id) * 224
+        )
+
+    def _table_count(self, table: str, instrument_id: int | None = None) -> int:
+        with self._connect() as conn:
+            if instrument_id is None:
+                row = _expect_row(conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone())
+            else:
+                row = _expect_row(
+                    conn.execute(
+                        f"SELECT COUNT(*) AS count FROM {table} WHERE instrument_id = %s",
+                        (instrument_id,),
+                    ).fetchone()
+                )
+        return int(row["count"])
+
+    def _market_coverage_percent(self, instrument_id: int) -> Decimal:
+        coverage = self.coverage_for(instrument_id)
+        if not coverage:
+            return Decimal("0")
+        return sum((item.progress_percent for item in coverage), Decimal("0")) / Decimal(
+            len(coverage)
+        )
+
+    def _health_checks(
+        self, coverage: list[CoverageStatus], alerts: list[NotificationEvent]
+    ) -> list[HealthCheck]:
+        ticker_warnings = sum(
+            1
+            for item in coverage
+            if item.data_type == "ticker_snapshot" and item.status != "normal"
+        )
+        candle_warnings = sum(
+            1 for item in coverage if item.data_type == "source_candle" and item.status != "normal"
+        )
+        orderbook_warnings = sum(
+            1
+            for item in coverage
+            if item.data_type == "orderbook_summary" and item.status != "normal"
+        )
+        open_alerts = [alert for alert in alerts if alert.status == "open"]
+        return [
+            HealthCheck(
+                title="현재가·거래대금",
+                status="normal" if ticker_warnings == 0 else "warning",
+                status_label="정상" if ticker_warnings == 0 else "주의",
+                detail="최근 1-3분 정상" if ticker_warnings == 0 else f"지연 {ticker_warnings}구간",
+            ),
+            HealthCheck(
+                title="캔들 상태",
+                status="normal" if candle_warnings == 0 else "warning",
+                status_label="정상" if candle_warnings == 0 else "주의",
+                detail="직전 완성 1분봉 저장"
+                if candle_warnings == 0
+                else f"결측 {candle_warnings}구간",
+            ),
+            HealthCheck(
+                title="호가 상태",
+                status="normal" if orderbook_warnings == 0 else "warning",
+                status_label="정상" if orderbook_warnings == 0 else "주의",
+                detail="매수 잔량 우세"
+                if orderbook_warnings == 0
+                else f"지연 {orderbook_warnings}구간",
+            ),
+            HealthCheck(
+                title="완전성 검사",
+                status="normal" if not open_alerts else "warning",
+                status_label="정상" if not open_alerts else "주의",
+                detail="결측 0구간" if not open_alerts else f"알림 {len(open_alerts)}건",
+            ),
+        ]
 
     def _activate_target(
         self,

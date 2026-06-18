@@ -156,6 +156,9 @@ class MarketListRow:
     ticker_collected_at: datetime
     orderbook_collected_at: datetime
     quality_status: Literal["normal", "warning", "incident"]
+    coverage_percent: Decimal
+    storage_bytes: int
+    storage_bytes_display: str
 
 
 @dataclass(frozen=True)
@@ -177,6 +180,14 @@ class NotificationEvent:
     message: str
     status: Literal["open", "acknowledged", "resolved"]
     created_at: datetime
+
+
+@dataclass(frozen=True)
+class HealthCheck:
+    title: str
+    status: Literal["normal", "warning", "incident"]
+    status_label: str
+    detail: str
 
 
 @dataclass(frozen=True)
@@ -226,10 +237,20 @@ class BackfillJobTarget:
 class DashboardSummary:
     status: Literal["normal", "warning", "incident"]
     active_targets: int
+    active_target_limit: int
+    normal_targets: int
+    warning_targets: int
+    incident_targets: int
     failed_runs_24h: int
+    failure_rate_24h: Decimal
     delayed_targets: int
     missing_ranges_open: int
+    storage_bytes_today: int
+    storage_bytes_today_display: str
+    recent_request_count: int
+    rate_limit_remaining_percent: Decimal
     coverage: list[CoverageStatus]
     targets: list[CollectionDashboardTarget]
     alerts: list[NotificationEvent]
+    health_checks: list[HealthCheck]
     refreshed_at: datetime

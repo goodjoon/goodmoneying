@@ -18,12 +18,13 @@ describe("데이터 수집관리 화면", () => {
     expect(screen.getByRole("button", { name: "매매 전략" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "봇 관리" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "시스템 관리" })).toBeDisabled();
-    expect(await screen.findByRole("heading", { name: "운영 상태 대시보드" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "업비트 수집 운영 상태" })).toBeInTheDocument();
     expect(await screen.findByText("활성 수집 대상")).toBeInTheDocument();
-    expect(screen.getByText("KRW-BTC")).toBeInTheDocument();
+    expect(screen.getByText("BTC / KRW")).toBeInTheDocument();
     expect(screen.getAllByText("최신수집중")[0]).toBeInTheDocument();
+    expect(screen.getByText("운영 헬스")).toBeInTheDocument();
     expect(screen.getAllByText("KST")[0]).toBeInTheDocument();
-    expect(screen.getAllByText("UTC")[0]).toBeInTheDocument();
+    expect(screen.queryByText("UTC")).not.toBeInTheDocument();
     expect(container.querySelector(".app-shell")).toHaveAttribute("data-theme", "dark");
   });
 
@@ -32,17 +33,17 @@ describe("데이터 수집관리 화면", () => {
     render(<App />);
 
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "운영 상태 대시보드" })).toBeInTheDocument()
+      expect(screen.getByRole("heading", { name: "업비트 수집 운영 상태" })).toBeInTheDocument()
     );
 
-    await user.click(screen.getByRole("button", { name: /KRW-BTC/ }));
+    await user.click(screen.getByRole("button", { name: /BTC \/ KRW/ }));
 
     expect(await screen.findByText("수집 계획")).toBeInTheDocument();
     expect(screen.getAllByText("2026-01-01 00:00 KST ~ 현재(지속)")[0]).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "수정" })).toBeInTheDocument();
     expect(screen.getByText("캔들")).toBeInTheDocument();
     expect(screen.getByText("현재가")).toBeInTheDocument();
-    expect(screen.getByText("호가 요약")).toBeInTheDocument();
+    expect(screen.getAllByText("호가 요약")[0]).toBeInTheDocument();
     expect(document.querySelector(".coverage-segment.missing")).toBeInTheDocument();
   });
 
@@ -50,15 +51,15 @@ describe("데이터 수집관리 화면", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await screen.findByRole("heading", { name: "운영 상태 대시보드" });
+    await screen.findByRole("heading", { name: "업비트 수집 운영 상태" });
     await user.click(screen.getByRole("button", { name: "수집 대상 설정" }));
     expect(await screen.findByText("후보 유니버스 상위 100개")).toBeInTheDocument();
-    expect(screen.getByText("선택 50/최대 50")).toBeInTheDocument();
+    expect(screen.getByText("선택 50/50")).toBeInTheDocument();
 
-    await screen.findByText("KRW-BTC");
+    await screen.findByText("BTC / KRW");
     await user.click(screen.getAllByRole("checkbox")[0]);
 
-    expect(screen.getByText("선택 49/최대 50")).toBeInTheDocument();
+    expect(screen.getByText("선택 49/50")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "저장" })).toBeEnabled();
   });
 
@@ -66,19 +67,20 @@ describe("데이터 수집관리 화면", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await screen.findByRole("heading", { name: "운영 상태 대시보드" });
+    await screen.findByRole("heading", { name: "업비트 수집 운영 상태" });
     await user.click(screen.getByRole("button", { name: "시장 리스트" }));
     expect(await screen.findByText("거래 상품")).toBeInTheDocument();
     expect(screen.getByText("등락률")).toBeInTheDocument();
     expect(screen.getByText("24시간 거래대금")).toBeInTheDocument();
-    expect(screen.getByText("KRW-BTC")).toBeInTheDocument();
-    expect(screen.getByText("KRW-GM050")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /KRW-GM003/ }));
+    expect(screen.getByText("BTC / KRW")).toBeInTheDocument();
+    expect(screen.getByText("GM050 / KRW")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /GM003 \/ KRW/ }));
 
     expect(await screen.findByRole("dialog", { name: "코인 상세" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "KRW-GM003" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "GM003 / KRW" })).toBeInTheDocument();
     expect(screen.getByText("2026년 1월 1분봉")).toBeInTheDocument();
-    expect(screen.getByLabelText("캔들 차트")).toBeInTheDocument();
+    expect(screen.getByLabelText("TradingView 캔들 차트")).toBeInTheDocument();
+    expect(screen.getByText("현재가 게이지")).toBeInTheDocument();
     expect(document.querySelector(".modal-backdrop")).toBeInTheDocument();
   });
 });
