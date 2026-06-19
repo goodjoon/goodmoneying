@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: goodmoneying-postgres
+    restart: unless-stopped
+    env_file:
+      - ${GOODMONEYING_INFRA_BASE_DIR}/env/infra.env
+    ports:
+      - "100.107.98.22:5432:5432"
+    volumes:
+      - ${GOODMONEYING_INFRA_POSTGRES_DATA_DIR}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12

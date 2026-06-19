@@ -1,0 +1,163 @@
+name: Deploy prod-home
+
+on:
+  push:
+    branches:
+      - release
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "배포 프로필"
+        required: true
+        type: choice
+        options:
+          - prod-home
+
+concurrency:
+  group: deploy-prod-home-v3
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  deploy:
+    runs-on:
+      - self-hosted
+      - mac-mini-m4
+    environment: prod
+    timeout-minutes: 60
+    env:
+      DEPLOY_PROFILE: prod-home
+      REGISTRY: ghcr.io
+      IMAGE_NAMESPACE: goodjoon-company
+      DOCKER_CONFIG: /Users/goodjoon/DATA/applications/goodmoneying/.docker
+      DOCKER_HOST: unix:///Users/goodjoon/.docker/run/docker.sock
+      DOCKER_BUILDKIT: "0"
+      BUILD_PLATFORMS: linux/amd64,linux/arm64
+      RUNNER_LOGIN_SHELL_HOST: goodjoon@Mac-Mini-M4.local
+      RUNNER_DOCKER_BIN: /usr/local/bin/docker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set image tag
+        run: echo "IMAGE_TAG=release-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Prepare runner PATH
+        run: |
+          echo "/Users/goodjoon/.local/bin" >> "$GITHUB_PATH"
+          echo "/Users/goodjoon/.nvm/versions/node/v24.14.1/bin" >> "$GITHUB_PATH"
+          echo "/opt/homebrew/opt/python@3.14/libexec/bin" >> "$GITHUB_PATH"
+          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+          echo "/usr/local/bin" >> "$GITHUB_PATH"
+          echo "/Applications/Docker.app/Contents/Resources/bin" >> "$GITHUB_PATH"
+
+      - name: Verify runner toolchain
+        run: |
+          python3 --version
+          uv --version
+          node --version
+          npm --version
+
+      - name: Prepare runner Docker CLI plugins
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=10 "${RUNNER_LOGIN_SHELL_HOST}" "
+            set -euo pipefail
+            mkdir -p '${DOCKER_CONFIG}/cli-plugins'
+            rm -f '${DOCKER_CONFIG}/cli-plugins/docker-buildx'
+            rm -f '${DOCKER_CONFIG}/cli-plugins/docker-compose'
+            ln -s /Applications/Docker.app/Contents/Resources/cli-plugins/docker-buildx '${DOCKER_CONFIG}/cli-plugins/docker-buildx'
+            ln -s /Applications/Docker.app/Contents/Resources/cli-plugins/docker-compose '${DOCKER_CONFIG}/cli-plugins/docker-compose'
+          "
+
+      - name: Verify runner login shell Docker
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=10 "${RUNNER_LOGIN_SHELL_HOST}" "
+            set -euo pipefail
+            export DOCKER_CONFIG='${DOCKER_CONFIG}'
+            export DOCKER_HOST='${DOCKER_HOST}'
+            '${RUNNER_DOCKER_BIN}' version --format '{{.Server.Version}}'
+            '${RUNNER_DOCKER_BIN}' info --format '{{.OSType}}/{{.Architecture}}'
+            '${RUNNER_DOCKER_BIN}' buildx version
+          "
+
+      - name: Python dependencies
+        run: uv sync --frozen
+
+      - name: Node dependencies
+        run: npm ci
+
+      - name: Playwright browsers
+        run: npx playwright install chromium
+
+      - name: Python lint
+        run: uv run ruff check .
+
+      - name: Python type check
+        run: uv run mypy apps/api apps/worker packages/shared tests
+
+      - name: Python tests
+        run: uv run pytest
+
+      - name: Web tests
+        run: npm test
+
+      - name: Web build
+        run: npm run build
+
+      - name: Build and push api
+        run: |
+          ssh -o BatchMode=yes "${RUNNER_LOGIN_SHELL_HOST}" "
+            set -euo pipefail
+            cd '${GITHUB_WORKSPACE}'
+            export DOCKER_CONFIG='${DOCKER_CONFIG}'
+            export DOCKER_HOST='${DOCKER_HOST}'
+            export DOCKER_BUILDKIT='${DOCKER_BUILDKIT}'
+            '${RUNNER_DOCKER_BIN}' buildx build --platform '${BUILD_PLATFORMS}' --push -f apps/api/Dockerfile -t ghcr.io/${IMAGE_NAMESPACE}/goodmoneying-api:${IMAGE_TAG} .
+          "
+
+      - name: Build and push worker
+        run: |
+          ssh -o BatchMode=yes "${RUNNER_LOGIN_SHELL_HOST}" "
+            set -euo pipefail
+            cd '${GITHUB_WORKSPACE}'
+            export DOCKER_CONFIG='${DOCKER_CONFIG}'
+            export DOCKER_HOST='${DOCKER_HOST}'
+            export DOCKER_BUILDKIT='${DOCKER_BUILDKIT}'
+            '${RUNNER_DOCKER_BIN}' buildx build --platform '${BUILD_PLATFORMS}' --push -f apps/worker/Dockerfile -t ghcr.io/${IMAGE_NAMESPACE}/goodmoneying-worker:${IMAGE_TAG} .
+          "
+
+      - name: Build and push web
+        run: |
+          ssh -o BatchMode=yes "${RUNNER_LOGIN_SHELL_HOST}" "
+            set -euo pipefail
+            cd '${GITHUB_WORKSPACE}'
+            export DOCKER_CONFIG='${DOCKER_CONFIG}'
+            export DOCKER_HOST='${DOCKER_HOST}'
+            export DOCKER_BUILDKIT='${DOCKER_BUILDKIT}'
+            '${RUNNER_DOCKER_BIN}' buildx build --platform '${BUILD_PLATFORMS}' --push --build-arg VITE_API_BASE_URL=http://app-server01:8000 -f apps/web/Dockerfile -t ghcr.io/${IMAGE_NAMESPACE}/goodmoneying-web:${IMAGE_TAG} .
+          "
+
+      - name: Deploy profile
+        run: deploy/scripts/deploy-profile.sh prod-home "${IMAGE_TAG}"
+
+      - name: Healthcheck profile
+        run: deploy/scripts/healthcheck-profile.sh prod-home
+
+      - name: Load prod-home E2E operator token
+        run: |
+          token="$(ssh -o BatchMode=yes app-server01 "grep '^GOODMONEYING_OPERATOR_TOKEN=' /home/goodjoon/project/goodmoneying/env/app.env | cut -d= -f2-")"
+          if [ -z "$token" ]; then
+            echo "GOODMONEYING_OPERATOR_TOKEN is missing from APP SERVER 01 app.env" >&2
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          echo "E2E_OPERATOR_TOKEN=$token" >> "$GITHUB_ENV"
+
+      - name: E2E against prod-home
+        env:
+          E2E_SKIP_WEBSERVER: "1"
+          E2E_API_BASE_URL: http://app-server01:8000
+          E2E_WEB_BASE_URL: http://bmax-ubuntu:8080
+        run: npm run e2e

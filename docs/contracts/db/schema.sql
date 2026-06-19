@@ -1,7 +1,7 @@
 -- goodmoneying M1 DB contract
 -- Source of truth for PostgreSQL schema used by the Upbit Collection Pipeline.
 
-CREATE TABLE instruments (
+CREATE TABLE IF NOT EXISTS instruments (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   exchange TEXT NOT NULL,
   market_code TEXT NOT NULL,
@@ -15,7 +15,7 @@ CREATE TABLE instruments (
   CONSTRAINT instruments_status_ck CHECK (status IN ('active', 'inactive'))
 );
 
-CREATE TABLE candidate_universe_snapshots (
+CREATE TABLE IF NOT EXISTS candidate_universe_snapshots (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   source TEXT NOT NULL,
   exchange TEXT NOT NULL,
@@ -26,7 +26,7 @@ CREATE TABLE candidate_universe_snapshots (
   CONSTRAINT candidate_universe_snapshots_source_ck CHECK (source IN ('UPBIT'))
 );
 
-CREATE TABLE candidate_universe_entries (
+CREATE TABLE IF NOT EXISTS candidate_universe_entries (
   snapshot_id BIGINT NOT NULL REFERENCES candidate_universe_snapshots(id) ON DELETE CASCADE,
   instrument_id BIGINT NOT NULL REFERENCES instruments(id),
   rank INTEGER NOT NULL,
@@ -38,7 +38,7 @@ CREATE TABLE candidate_universe_entries (
   CONSTRAINT candidate_universe_entries_rank_ck CHECK (rank BETWEEN 1 AND 100)
 );
 
-CREATE TABLE collection_targets (
+CREATE TABLE IF NOT EXISTS collection_targets (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   instrument_id BIGINT NOT NULL REFERENCES instruments(id),
   status TEXT NOT NULL,
@@ -52,7 +52,7 @@ CREATE TABLE collection_targets (
   CONSTRAINT collection_targets_candidate_status_ck CHECK (candidate_status IN ('in_universe', 'out_of_universe'))
 );
 
-CREATE TABLE collection_target_changes (
+CREATE TABLE IF NOT EXISTS collection_target_changes (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   instrument_id BIGINT NOT NULL REFERENCES instruments(id),
   previous_status TEXT,
@@ -65,7 +65,59 @@ CREATE TABLE collection_target_changes (
   CONSTRAINT collection_target_changes_actor_ck CHECK (actor IN ('system', 'local_user'))
 );
 
-CREATE TABLE collection_settings (
+CREATE TABLE IF NOT EXISTS collection_plans (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  instrument_id BIGINT NOT NULL REFERENCES instruments(id),
+  preset TEXT NOT NULL,
+  range_start_at TIMESTAMPTZ NOT NULL,
+  range_end_at TIMESTAMPTZ,
+  is_continuous BOOLEAN NOT NULL DEFAULT true,
+  method TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT collection_plans_instrument_uk UNIQUE (instrument_id),
+  CONSTRAINT collection_plans_method_ck CHECK (method IN ('safe_restart', 'incremental')),
+  CONSTRAINT collection_plans_status_ck CHECK (status IN ('latest_collecting', 'collecting', 'paused', 'stopped')),
+  CONSTRAINT collection_plans_range_ck CHECK (range_end_at IS NULL OR range_start_at < range_end_at)
+);
+
+CREATE TABLE IF NOT EXISTS collection_coverage_snapshots (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  instrument_id BIGINT NOT NULL REFERENCES instruments(id),
+  data_type TEXT NOT NULL,
+  range_start_at TIMESTAMPTZ NOT NULL,
+  range_end_at TIMESTAMPTZ,
+  status TEXT NOT NULL,
+  progress_percent NUMERIC NOT NULL,
+  last_successful_at TIMESTAMPTZ NOT NULL,
+  missing_segment_count INTEGER NOT NULL DEFAULT 0,
+  calculated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT collection_coverage_snapshots_data_type_ck CHECK (data_type IN ('source_candle', 'ticker_snapshot', 'orderbook_summary')),
+  CONSTRAINT collection_coverage_snapshots_status_ck CHECK (status IN ('normal', 'warning', 'incident', 'backfilling')),
+  CONSTRAINT collection_coverage_snapshots_progress_ck CHECK (progress_percent >= 0 AND progress_percent <= 100),
+  CONSTRAINT collection_coverage_snapshots_missing_count_ck CHECK (missing_segment_count >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS collection_coverage_segments (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  snapshot_id BIGINT NOT NULL REFERENCES collection_coverage_snapshots(id) ON DELETE CASCADE,
+  data_type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  offset_percent NUMERIC NOT NULL,
+  width_percent NUMERIC NOT NULL,
+  segment_start_at TIMESTAMPTZ NOT NULL,
+  segment_end_at TIMESTAMPTZ NOT NULL,
+  label TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT collection_coverage_segments_data_type_ck CHECK (data_type IN ('source_candle', 'ticker_snapshot', 'orderbook_summary')),
+  CONSTRAINT collection_coverage_segments_status_ck CHECK (status IN ('collected', 'missing', 'collecting', 'future')),
+  CONSTRAINT collection_coverage_segments_percent_ck CHECK (offset_percent >= 0 AND width_percent >= 0 AND offset_percent + width_percent <= 100),
+  CONSTRAINT collection_coverage_segments_range_ck CHECK (segment_start_at < segment_end_at)
+);
+
+CREATE TABLE IF NOT EXISTS collection_settings (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL,
   updated_by TEXT NOT NULL DEFAULT 'system',
@@ -73,7 +125,7 @@ CREATE TABLE collection_settings (
   CONSTRAINT collection_settings_updated_by_ck CHECK (updated_by IN ('system', 'local_user'))
 );
 
-CREATE TABLE collection_runs (
+CREATE TABLE IF NOT EXISTS collection_runs (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   run_type TEXT NOT NULL,
   data_type TEXT NOT NULL,
@@ -90,7 +142,7 @@ CREATE TABLE collection_runs (
   CONSTRAINT collection_runs_trigger_type_ck CHECK (trigger_type IN ('schedule', 'manual', 'backfill_job', 'system'))
 );
 
-CREATE TABLE target_collection_results (
+CREATE TABLE IF NOT EXISTS target_collection_results (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   collection_run_id BIGINT NOT NULL REFERENCES collection_runs(id) ON DELETE CASCADE,
   instrument_id BIGINT REFERENCES instruments(id),
@@ -111,7 +163,7 @@ CREATE TABLE target_collection_results (
   CONSTRAINT target_collection_results_rows_written_ck CHECK (rows_written >= 0)
 );
 
-CREATE TABLE source_candles (
+CREATE TABLE IF NOT EXISTS source_candles (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   instrument_id BIGINT NOT NULL REFERENCES instruments(id),
   source TEXT NOT NULL,
@@ -133,7 +185,7 @@ CREATE TABLE source_candles (
   CONSTRAINT source_candles_candle_unit_ck CHECK (candle_unit IN ('1m', '1d'))
 );
 
-CREATE TABLE ticker_snapshots (
+CREATE TABLE IF NOT EXISTS ticker_snapshots (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   instrument_id BIGINT NOT NULL REFERENCES instruments(id),
   source TEXT NOT NULL,
@@ -156,7 +208,7 @@ CREATE TABLE ticker_snapshots (
   CONSTRAINT ticker_snapshots_source_ck CHECK (source IN ('UPBIT'))
 );
 
-CREATE TABLE orderbook_summaries (
+CREATE TABLE IF NOT EXISTS orderbook_summaries (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   instrument_id BIGINT NOT NULL REFERENCES instruments(id),
   source TEXT NOT NULL,
@@ -178,7 +230,7 @@ CREATE TABLE orderbook_summaries (
   CONSTRAINT orderbook_summaries_source_ck CHECK (source IN ('UPBIT'))
 );
 
-CREATE TABLE missing_ranges (
+CREATE TABLE IF NOT EXISTS missing_ranges (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   instrument_id BIGINT NOT NULL REFERENCES instruments(id),
   data_type TEXT NOT NULL,
@@ -197,7 +249,7 @@ CREATE TABLE missing_ranges (
   CONSTRAINT missing_ranges_range_ck CHECK (range_start_at < range_end_at)
 );
 
-CREATE TABLE backfill_jobs (
+CREATE TABLE IF NOT EXISTS backfill_jobs (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   status TEXT NOT NULL,
   data_type TEXT NOT NULL,
@@ -223,7 +275,7 @@ CREATE TABLE backfill_jobs (
   CONSTRAINT backfill_jobs_estimated_row_count_ck CHECK (estimated_row_count >= 0)
 );
 
-CREATE TABLE backfill_job_targets (
+CREATE TABLE IF NOT EXISTS backfill_job_targets (
   backfill_job_id BIGINT NOT NULL REFERENCES backfill_jobs(id) ON DELETE CASCADE,
   instrument_id BIGINT NOT NULL REFERENCES instruments(id),
   status TEXT NOT NULL,
@@ -235,7 +287,7 @@ CREATE TABLE backfill_job_targets (
   CONSTRAINT backfill_job_targets_status_ck CHECK (status IN ('pending', 'running', 'paused', 'stopped', 'succeeded', 'failed'))
 );
 
-CREATE TABLE audit_logs (
+CREATE TABLE IF NOT EXISTS audit_logs (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   actor TEXT NOT NULL,
   action TEXT NOT NULL,
@@ -248,7 +300,7 @@ CREATE TABLE audit_logs (
   CONSTRAINT audit_logs_actor_ck CHECK (actor IN ('system', 'local_user'))
 );
 
-CREATE TABLE notification_events (
+CREATE TABLE IF NOT EXISTS notification_events (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   severity TEXT NOT NULL,
   event_type TEXT NOT NULL,
@@ -264,7 +316,7 @@ CREATE TABLE notification_events (
   CONSTRAINT notification_events_status_ck CHECK (status IN ('open', 'acknowledged', 'resolved'))
 );
 
-CREATE TABLE raw_response_samples (
+CREATE TABLE IF NOT EXISTS raw_response_samples (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   source TEXT NOT NULL,
   endpoint TEXT NOT NULL,
@@ -278,12 +330,15 @@ CREATE TABLE raw_response_samples (
   CONSTRAINT raw_response_samples_reason_ck CHECK (reason IN ('parse_error', 'schema_mismatch', 'unexpected_response', 'fixture_sample'))
 );
 
-CREATE INDEX source_candles_instrument_time_idx ON source_candles (instrument_id, candle_unit, candle_start_at DESC);
-CREATE INDEX ticker_snapshots_instrument_bucket_idx ON ticker_snapshots (instrument_id, bucket_at DESC);
-CREATE INDEX orderbook_summaries_instrument_bucket_idx ON orderbook_summaries (instrument_id, bucket_at DESC);
-CREATE INDEX collection_runs_started_at_idx ON collection_runs (started_at DESC);
-CREATE INDEX target_collection_results_run_idx ON target_collection_results (collection_run_id, instrument_id);
-CREATE INDEX missing_ranges_status_idx ON missing_ranges (status, instrument_id, data_type);
-CREATE INDEX backfill_jobs_status_idx ON backfill_jobs (status, created_at DESC);
-CREATE INDEX audit_logs_created_at_idx ON audit_logs (created_at DESC);
-CREATE INDEX notification_events_status_idx ON notification_events (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS source_candles_instrument_time_idx ON source_candles (instrument_id, candle_unit, candle_start_at DESC);
+CREATE INDEX IF NOT EXISTS ticker_snapshots_instrument_bucket_idx ON ticker_snapshots (instrument_id, bucket_at DESC);
+CREATE INDEX IF NOT EXISTS orderbook_summaries_instrument_bucket_idx ON orderbook_summaries (instrument_id, bucket_at DESC);
+CREATE INDEX IF NOT EXISTS collection_runs_started_at_idx ON collection_runs (started_at DESC);
+CREATE INDEX IF NOT EXISTS target_collection_results_run_idx ON target_collection_results (collection_run_id, instrument_id);
+CREATE INDEX IF NOT EXISTS collection_plans_status_idx ON collection_plans (status, instrument_id);
+CREATE INDEX IF NOT EXISTS collection_coverage_snapshots_latest_idx ON collection_coverage_snapshots (instrument_id, data_type, calculated_at DESC);
+CREATE INDEX IF NOT EXISTS collection_coverage_segments_snapshot_idx ON collection_coverage_segments (snapshot_id, data_type);
+CREATE INDEX IF NOT EXISTS missing_ranges_status_idx ON missing_ranges (status, instrument_id, data_type);
+CREATE INDEX IF NOT EXISTS backfill_jobs_status_idx ON backfill_jobs (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS audit_logs_created_at_idx ON audit_logs (created_at DESC);
+CREATE INDEX IF NOT EXISTS notification_events_status_idx ON notification_events (status, created_at DESC);
