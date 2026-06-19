@@ -16,8 +16,19 @@
 
 - `release` 브랜치 push 또는 수동 실행(`workflow_dispatch`)은 Mac Mini M4의 GitHub Actions runner에서 `.github/workflows/deploy.yml`을 실행한다.
 - workflow는 검증 후 `api`, `worker`, `web` 이미지를 private GHCR(GitHub Container Registry)에 `release-{short-sha}` 태그(tag)로 push한다.
-- runner에서 `deploy/scripts/deploy-profile.sh prod-home "${IMAGE_TAG}"`가 실행되고, `profile.env`와 `hosts.env`를 읽어 서버별 compose 파일을 복사한 뒤 원격 `docker compose pull`과 `up -d`를 실행한다.
+- runner에서 `deploy/scripts/deploy-profile.sh prod-home "${IMAGE_TAG}"`가 실행되고, `runner/profile.env`와 `runner/hosts.env`를 읽어 서버별 target compose 파일을 복사한 뒤 원격 `docker compose pull`과 `up -d`를 실행한다.
 - 배포 후 runner에서 `deploy/scripts/healthcheck-profile.sh prod-home`이 API, web, PostgreSQL, worker 상태를 점검하고, 통과하면 운영 URL 대상으로 `npm run e2e`를 실행한다.
+
+## 파일 실행 주체
+
+| 경로 | 주체 | 설명 |
+|---|---|---|
+| `.github/workflows/deploy.yml` | GitHub Actions, Mac Mini M4 runner | release push를 받아 검증, 이미지 빌드, 배포 스크립트 실행 |
+| `deploy/scripts/*.sh` | Mac Mini M4 runner | profile을 읽고 SSH로 target 서버를 제어하는 공통 스크립트 |
+| `deploy/profiles/prod-home/runner/` | Mac Mini M4 runner | runner가 읽는 profile/env/path 입력값 |
+| `deploy/profiles/prod-home/target/infra/compose.yml` | Mac Mini M4 target | PostgreSQL compose 정의 |
+| `deploy/profiles/prod-home/target/app/compose.yml` | APP SERVER 01 target | API, worker compose 정의 |
+| `deploy/profiles/prod-home/target/web/compose.yml` | bmax-ubuntu target | web compose 정의 |
 
 ## 비밀값
 
@@ -29,7 +40,7 @@
 
 ## 서버별 host volume 경로와 설정 파일
 
-컨테이너의 데이터 디렉터리(data directory), 캐시(cache), 서버별 설정 디렉터리(configuration directory)는 host 경로에 bind mount한다. 애플리케이션 로그(application log)는 파일 mount가 아니라 stdout/stderr 컨테이너 로그(container log)로 남긴다. 서버별 host 경로는 [hosts.env](./hosts.env)에서 바꾼다.
+컨테이너의 데이터 디렉터리(data directory), 캐시(cache), 서버별 설정 디렉터리(configuration directory)는 host 경로에 bind mount한다. 애플리케이션 로그(application log)는 파일 mount가 아니라 stdout/stderr 컨테이너 로그(container log)로 남긴다. 서버별 host 경로는 [runner/hosts.env](./runner/hosts.env)에서 바꾼다.
 
 | 서버 | 설정 키 | 기본 host 경로 | 컨테이너 경로 |
 |---|---|---|---|
@@ -44,7 +55,7 @@
 | bmax-ubuntu | `GOODMONEYING_WEB_NGINX_CACHE_DIR` | `/home/goodjoon/applications/goodmoneying/web/nginx-cache` | `/var/cache/nginx` |
 | bmax-ubuntu | `GOODMONEYING_WEB_CONFIG_DIR` | `/home/goodjoon/applications/goodmoneying/web/config` | `/etc/goodmoneying` |
 
-`deploy-profile.sh`는 배포 시 각 서버의 base directory에 `deploy.hosts.env`와 compose 파일을 복사하고, `docker compose --env-file {base}/deploy.hosts.env`로 compose 변수 치환을 수행한다.
+`deploy-profile.sh`는 배포 시 각 서버의 base directory에 `deploy.hosts.env`, `deploy.compose.env`, compose 파일을 복사한다. `deploy.compose.env`에는 host 경로와 마지막 배포 이미지 태그(image tag)가 함께 저장되므로, 이후 start/stop 스크립트는 별도 환경변수(environment variable) 입력 없이 `docker compose --env-file {base}/deploy.compose.env`를 실행한다.
 
 `application.yml`, `logback.yml`처럼 운영 서버에서 바뀔 수 있는 설정 파일은 이미지(image)에만 두지 않는다. 기본값은 이미지에 포함하되, 운영에서 바꾸는 파일은 host의 config 디렉터리에 두고 read-only mount로 컨테이너에 제공한다. 현재 goodmoneying 앱의 주요 운영 설정은 각 서버의 `{base}/env/*.env`로 관리하며, 향후 파일 기반 설정을 읽는 런타임을 추가하면 `/etc/goodmoneying`을 읽도록 앱 실행 옵션을 연결한다.
 
@@ -90,4 +101,15 @@ printf '%s' "$CR_PAT" | docker login ghcr.io -u goodjoon-company --password-stdi
 
 ```bash
 GOODMONEYING_DEPLOY_DRY_RUN=1 deploy/scripts/deploy-profile.sh prod-home release-abc1234
+GOODMONEYING_DEPLOY_DRY_RUN=1 deploy/scripts/start-profile.sh prod-home
+GOODMONEYING_DEPLOY_DRY_RUN=1 deploy/scripts/stop-profile.sh prod-home
+```
+
+## 수동 start/stop
+
+최초 배포 후에는 target 서버마다 `{base}/deploy.compose.env`가 남는다. 이 파일에 마지막 배포 이미지 태그(image tag)가 저장되므로 수동 start/stop 시 `GOODMONEYING_IMAGE_TAG`를 다시 입력하지 않는다.
+
+```bash
+deploy/scripts/start-profile.sh prod-home
+deploy/scripts/stop-profile.sh prod-home
 ```

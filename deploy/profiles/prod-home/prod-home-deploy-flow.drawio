@@ -19,16 +19,16 @@
                 <mxCell id="6" value="4. deploy-profile.sh 실행 위치: runner 입력: prod-home + image tag" style="rounded=1;arcSize=20;html=1;whiteSpace=wrap;fillColor=#DBEAFE;strokeColor=#2563EB;strokeWidth=1.5;fontColor=#1E293B;fontSize=13;fontFamily=Times New Roman;verticalAlign=middle;align=center" parent="1" vertex="1">
                     <mxGeometry x="264" y="256" width="200" height="100" as="geometry"/>
                 </mxCell>
-                <mxCell id="7" value="prod-home profile profile.env hosts.env" style="shape=document;boundedLbl=1;html=1;whiteSpace=wrap;fillColor=#FFFFFF;strokeColor=#CBD5E1;strokeWidth=1.5;fontColor=#1E293B;fontSize=13;fontFamily=Times New Roman;verticalAlign=middle;align=center" parent="1" vertex="1">
+                <mxCell id="7" value="prod-home runner profile.env hosts.env" style="shape=document;boundedLbl=1;html=1;whiteSpace=wrap;fillColor=#FFFFFF;strokeColor=#CBD5E1;strokeWidth=1.5;fontColor=#1E293B;fontSize=13;fontFamily=Times New Roman;verticalAlign=middle;align=center" parent="1" vertex="1">
                     <mxGeometry x="8" y="264" width="160" height="80" as="geometry"/>
                 </mxCell>
-                <mxCell id="8" value="Mac Mini M4 compose.infra.yml postgres" style="shape=cylinder3;boundedLbl=1;backgroundOutline=1;size=15;html=1;whiteSpace=wrap;fillColor=#D1FAE5;strokeColor=#059669;strokeWidth=1.5;fontColor=#1E293B;fontSize=13;fontFamily=Times New Roman;verticalAlign=middle;align=center" parent="1" vertex="1">
+                <mxCell id="8" value="Mac Mini M4 target/infra compose.yml postgres" style="shape=cylinder3;boundedLbl=1;backgroundOutline=1;size=15;html=1;whiteSpace=wrap;fillColor=#D1FAE5;strokeColor=#059669;strokeWidth=1.5;fontColor=#1E293B;fontSize=13;fontFamily=Times New Roman;verticalAlign=middle;align=center" parent="1" vertex="1">
                     <mxGeometry x="600" y="184" width="200" height="100" as="geometry"/>
                 </mxCell>
-                <mxCell id="9" value="APP SERVER 01 compose.app.yml api + worker" style="rounded=1;arcSize=20;html=1;whiteSpace=wrap;fillColor=#DBEAFE;strokeColor=#2563EB;strokeWidth=1.5;fontColor=#1E293B;fontSize=13;fontFamily=Times New Roman;verticalAlign=middle;align=center" parent="1" vertex="1">
+                <mxCell id="9" value="APP SERVER 01 target/app compose.yml api + worker" style="rounded=1;arcSize=20;html=1;whiteSpace=wrap;fillColor=#DBEAFE;strokeColor=#2563EB;strokeWidth=1.5;fontColor=#1E293B;fontSize=13;fontFamily=Times New Roman;verticalAlign=middle;align=center" parent="1" vertex="1">
                     <mxGeometry x="600" y="296" width="200" height="100" as="geometry"/>
                 </mxCell>
-                <mxCell id="10" value="bmax-ubuntu compose.web.yml web" style="rounded=1;arcSize=20;html=1;whiteSpace=wrap;fillColor=#DBEAFE;strokeColor=#2563EB;strokeWidth=1.5;fontColor=#1E293B;fontSize=13;fontFamily=Times New Roman;verticalAlign=middle;align=center" parent="1" vertex="1">
+                <mxCell id="10" value="bmax-ubuntu target/web compose.yml web" style="rounded=1;arcSize=20;html=1;whiteSpace=wrap;fillColor=#DBEAFE;strokeColor=#2563EB;strokeWidth=1.5;fontColor=#1E293B;fontSize=13;fontFamily=Times New Roman;verticalAlign=middle;align=center" parent="1" vertex="1">
                     <mxGeometry x="600" y="408" width="200" height="100" as="geometry"/>
                 </mxCell>
                 <mxCell id="11" value="5. healthcheck-profile.sh 실행 위치: runner" style="rounded=1;arcSize=20;html=1;whiteSpace=wrap;fillColor=#DBEAFE;strokeColor=#2563EB;strokeWidth=1.5;fontColor=#1E293B;fontSize=13;fontFamily=Times New Roman;verticalAlign=middle;align=center" parent="1" vertex="1">

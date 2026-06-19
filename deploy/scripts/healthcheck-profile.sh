@@ -19,8 +19,9 @@ if [[ "$PROFILE" != "prod-home" ]]; then
 fi
 
 PROFILE_DIR="$ROOT_DIR/deploy/profiles/$PROFILE"
-source "$PROFILE_DIR/profile.env"
-source "$PROFILE_DIR/hosts.env"
+RUNNER_DIR="$PROFILE_DIR/runner"
+source "$RUNNER_DIR/profile.env"
+source "$RUNNER_DIR/hosts.env"
 
 curl_args=(-fsS --connect-timeout 5 --max-time 10)
 ssh_args=(-o BatchMode=yes -o ConnectTimeout=10)

@@ -37,8 +37,34 @@ def run_healthcheck_script(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def run_start_script(*args: str) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["GOODMONEYING_DEPLOY_DRY_RUN"] = "1"
+    return subprocess.run(
+        ["bash", "deploy/scripts/start-profile.sh", *args],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+
+
+def run_stop_script(*args: str) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["GOODMONEYING_DEPLOY_DRY_RUN"] = "1"
+    return subprocess.run(
+        ["bash", "deploy/scripts/stop-profile.sh", *args],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+
+
 def load_compose(name: str) -> Mapping[str, Any]:
-    path = ROOT / f"deploy/profiles/prod-home/{name}"
+    path = ROOT / f"deploy/profiles/prod-home/target/{name}/compose.yml"
     return cast("Mapping[str, Any]", yaml.safe_load(path.read_text()))
 
 
@@ -49,11 +75,11 @@ def services(compose: Mapping[str, Any]) -> Mapping[str, Any]:
 def test_prod_home_profile_has_required_files() -> None:
     profile_dir = ROOT / "deploy/profiles/prod-home"
 
-    assert (profile_dir / "profile.env").is_file()
-    assert (profile_dir / "hosts.env").is_file()
-    assert (profile_dir / "compose.infra.yml").is_file()
-    assert (profile_dir / "compose.app.yml").is_file()
-    assert (profile_dir / "compose.web.yml").is_file()
+    assert (profile_dir / "runner/profile.env").is_file()
+    assert (profile_dir / "runner/hosts.env").is_file()
+    assert (profile_dir / "target/infra/compose.yml").is_file()
+    assert (profile_dir / "target/app/compose.yml").is_file()
+    assert (profile_dir / "target/web/compose.yml").is_file()
     assert (profile_dir / "README.md").is_file()
 
 
@@ -78,9 +104,9 @@ def test_web_dockerfile_accepts_api_base_build_arg() -> None:
 
 
 def test_prod_home_compose_files_assign_expected_services() -> None:
-    infra = load_compose("compose.infra.yml")
-    app = load_compose("compose.app.yml")
-    web = load_compose("compose.web.yml")
+    infra = load_compose("infra")
+    app = load_compose("app")
+    web = load_compose("web")
 
     assert set(services(infra)) == {"postgres"}
     assert set(services(app)) == {"api", "worker"}
@@ -88,9 +114,9 @@ def test_prod_home_compose_files_assign_expected_services() -> None:
 
 
 def test_prod_home_compose_uses_external_env_files() -> None:
-    infra = services(load_compose("compose.infra.yml"))
-    app = services(load_compose("compose.app.yml"))
-    web = services(load_compose("compose.web.yml"))
+    infra = services(load_compose("infra"))
+    app = services(load_compose("app"))
+    web = services(load_compose("web"))
 
     assert "${GOODMONEYING_INFRA_BASE_DIR}/env/infra.env" in infra["postgres"][
         "env_file"
@@ -101,7 +127,7 @@ def test_prod_home_compose_uses_external_env_files() -> None:
 
 
 def test_prod_home_hosts_env_defines_server_specific_data_and_config_paths() -> None:
-    hosts_env = (ROOT / "deploy/profiles/prod-home/hosts.env").read_text()
+    hosts_env = (ROOT / "deploy/profiles/prod-home/runner/hosts.env").read_text()
 
     assert (
         "GOODMONEYING_INFRA_BASE_DIR=/Users/goodjoon/DATA/applications/goodmoneying"
@@ -124,9 +150,9 @@ def test_prod_home_hosts_env_defines_server_specific_data_and_config_paths() -> 
 
 
 def test_prod_home_compose_mounts_data_cache_and_config_dirs_from_host_variables() -> None:
-    infra = services(load_compose("compose.infra.yml"))
-    app = services(load_compose("compose.app.yml"))
-    web = services(load_compose("compose.web.yml"))
+    infra = services(load_compose("infra"))
+    app = services(load_compose("app"))
+    web = services(load_compose("web"))
 
     assert "${GOODMONEYING_INFRA_POSTGRES_DATA_DIR}:/var/lib/postgresql/data" in infra[
         "postgres"
@@ -156,9 +182,9 @@ def test_prod_home_compose_mounts_data_cache_and_config_dirs_from_host_variables
 
 
 def test_prod_home_compose_binds_ports_to_tailscale_ips() -> None:
-    infra = services(load_compose("compose.infra.yml"))
-    app = services(load_compose("compose.app.yml"))
-    web = services(load_compose("compose.web.yml"))
+    infra = services(load_compose("infra"))
+    app = services(load_compose("app"))
+    web = services(load_compose("web"))
 
     assert infra["postgres"]["ports"] == ["100.107.98.22:5432:5432"]
     assert app["api"]["ports"] == ["100.115.38.59:8000:8000"]
@@ -166,8 +192,8 @@ def test_prod_home_compose_binds_ports_to_tailscale_ips() -> None:
 
 
 def test_prod_home_compose_uses_fixed_ghcr_image_names() -> None:
-    app = services(load_compose("compose.app.yml"))
-    web = services(load_compose("compose.web.yml"))
+    app = services(load_compose("app"))
+    web = services(load_compose("web"))
 
     assert (
         app["api"]["image"]
@@ -213,18 +239,18 @@ def test_deploy_script_dry_run_prints_remote_commands() -> None:
 
     assert result.returncode == 0
     assert "ssh Mac-Mini-M4.local" in result.stdout
-    assert "deploy.hosts.env" in result.stdout
+    assert "deploy.compose.env" in result.stdout
     assert (
         "docker compose --env-file "
-        "'/Users/goodjoon/DATA/applications/goodmoneying/deploy.hosts.env'"
+        "'/Users/goodjoon/DATA/applications/goodmoneying/deploy.compose.env'"
     ) in result.stdout
     assert (
         "docker compose --env-file "
-        "'/home/goodjoon/project/goodmoneying/deploy.hosts.env'"
+        "'/home/goodjoon/project/goodmoneying/deploy.compose.env'"
     ) in result.stdout
     assert (
         "docker compose --env-file "
-        "'/home/goodjoon/applications/goodmoneying/deploy.hosts.env'"
+        "'/home/goodjoon/applications/goodmoneying/deploy.compose.env'"
     ) in result.stdout
     assert "ssh app-server01" in result.stdout
     assert "ssh bmax-ubuntu" in result.stdout
@@ -256,12 +282,17 @@ def test_deploy_script_dry_run_prints_remote_commands() -> None:
     )
     assert "logs" not in result.stdout
     assert (
-        f"scp {ROOT}/deploy/profiles/prod-home/hosts.env "
+        f"scp {ROOT}/deploy/profiles/prod-home/runner/hosts.env "
         "Mac-Mini-M4.local:/Users/goodjoon/DATA/applications/goodmoneying/"
         "deploy.hosts.env"
     ) in result.stdout
     assert (
-        f"scp {ROOT}/deploy/profiles/prod-home/compose.infra.yml "
+        "ssh Mac-Mini-M4.local \"printf "
+        "'GOODMONEYING_IMAGE_TAG=%s\\n' 'release-def5678' >> "
+        "'/Users/goodjoon/DATA/applications/goodmoneying/deploy.compose.env'\""
+    ) in result.stdout
+    assert (
+        f"scp {ROOT}/deploy/profiles/prod-home/target/infra/compose.yml "
         "Mac-Mini-M4.local:/Users/goodjoon/DATA/applications/goodmoneying/"
         "compose.infra.yml"
     ) in result.stdout
@@ -313,3 +344,33 @@ def test_healthcheck_script_dry_run_prints_checks_in_order() -> None:
     postgres_index = result.stdout.index("docker exec goodmoneying-postgres")
     worker_index = result.stdout.index("goodmoneying-worker")
     assert api_index < web_index < postgres_index < worker_index
+
+
+def test_start_script_dry_run_uses_target_compose_env_in_start_order() -> None:
+    result = run_start_script("prod-home")
+
+    assert result.returncode == 0
+    assert "docker compose --env-file" in result.stdout
+    assert "deploy.compose.env" in result.stdout
+    assert "compose.infra.yml' up -d" in result.stdout
+    assert "compose.app.yml' up -d" in result.stdout
+    assert "compose.web.yml' up -d" in result.stdout
+    assert result.stdout.index("Mac-Mini-M4.local") < result.stdout.index(
+        "app-server01"
+    )
+    assert result.stdout.index("app-server01") < result.stdout.index("bmax-ubuntu")
+
+
+def test_stop_script_dry_run_uses_target_compose_env_in_stop_order() -> None:
+    result = run_stop_script("prod-home")
+
+    assert result.returncode == 0
+    assert "docker compose --env-file" in result.stdout
+    assert "deploy.compose.env" in result.stdout
+    assert "compose.web.yml' stop" in result.stdout
+    assert "compose.app.yml' stop" in result.stdout
+    assert "compose.infra.yml' stop" in result.stdout
+    assert result.stdout.index("bmax-ubuntu") < result.stdout.index("app-server01")
+    assert result.stdout.index("app-server01") < result.stdout.index(
+        "Mac-Mini-M4.local"
+    )
