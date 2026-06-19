@@ -55,9 +55,11 @@ def test_prod_home_compose_files_assign_expected_services() -> None:
 
 
 def test_prod_home_compose_uses_external_env_files() -> None:
+    infra = services(load_compose("compose.infra.yml"))
     app = services(load_compose("compose.app.yml"))
     web = services(load_compose("compose.web.yml"))
 
+    assert "/opt/goodmoneying/env/infra.env" in infra["postgres"]["env_file"]
     assert "/opt/goodmoneying/env/app.env" in app["api"]["env_file"]
     assert "/opt/goodmoneying/env/app.env" in app["worker"]["env_file"]
     assert "/opt/goodmoneying/env/web.env" in web["web"]["env_file"]
