@@ -103,3 +103,15 @@ def test_deploy_script_dry_run_prints_prod_home_steps() -> None:
     assert "infra host=Mac-Mini-M4.local compose=compose.infra.yml" in result.stdout
     assert "app host=app-server01 compose=compose.app.yml" in result.stdout
     assert "web host=bmax-ubuntu compose=compose.web.yml" in result.stdout
+
+
+def test_deploy_script_dry_run_prints_remote_commands() -> None:
+    result = run_deploy_script("prod-home", "release-def5678")
+
+    assert result.returncode == 0
+    assert "ssh Mac-Mini-M4.local" in result.stdout
+    assert "docker compose --env-file /opt/goodmoneying/env/infra.env" in result.stdout
+    assert "ssh app-server01" in result.stdout
+    assert "docker compose --env-file /opt/goodmoneying/env/app.env" in result.stdout
+    assert "ssh bmax-ubuntu" in result.stdout
+    assert "docker compose --env-file /opt/goodmoneying/env/web.env" in result.stdout
