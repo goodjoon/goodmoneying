@@ -15,6 +15,7 @@ Related Test: `docs/Test/2026-06-19-M1-prod-home-CICD-배포-검증.md`
 - Web 정적 앱의 운영 API base URL을 Docker build arg로 주입하도록 배포 워크플로우를 보강했다.
 - 운영 E2E가 APP SERVER 01의 `GOODMONEYING_OPERATOR_TOKEN`을 마스킹(masking)해 사용하도록 보강했다.
 - 운영 컨테이너 내부에서 `.local` mDNS hostname이 실패할 수 있어 DB URL은 Postgres가 바인드된 Tailscale IP를 사용하도록 정리했다.
+- GitHub Actions runner의 Playwright Chromium 브라우저를 배포 워크플로우에서 명시적으로 설치하도록 했다.
 
 ## 운영 선행 조건
 

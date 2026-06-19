@@ -126,6 +126,7 @@ def test_deploy_workflow_pushes_ghcr_and_runs_profile_scripts() -> None:
     )
     assert 'echo "IMAGE_TAG=release-${GITHUB_SHA::7}" >> "$GITHUB_ENV"' in runs
     assert "python3 --version\nuv --version\nnode --version\nnpm --version\n" in runs
+    assert "npx playwright install chromium" in runs
     assert "Prepare runner Docker CLI plugins" in workflow_text
     assert "docker-buildx" in workflow_text
     assert "docker-compose" in workflow_text

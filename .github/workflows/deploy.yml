@@ -88,6 +88,9 @@ jobs:
       - name: Node dependencies
         run: npm ci
 
+      - name: Playwright browsers
+        run: npx playwright install chromium
+
       - name: Python lint
         run: uv run ruff check .
 
