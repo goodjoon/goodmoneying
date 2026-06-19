@@ -29,6 +29,7 @@
 | `deploy/profiles/prod-home/target/infra/compose.yml` | Mac Mini M4 target | PostgreSQL compose 정의 |
 | `deploy/profiles/prod-home/target/app/compose.yml` | APP SERVER 01 target | API, worker compose 정의 |
 | `deploy/profiles/prod-home/target/web/compose.yml` | bmax-ubuntu target | web compose 정의 |
+| `deploy/profiles/prod-home/target/*/*.sh` | target 서버 | 각 서버에 복사되어 해당 서버에서 직접 start/stop 실행 |
 
 ## 비밀값
 
@@ -109,7 +110,39 @@ GOODMONEYING_DEPLOY_DRY_RUN=1 deploy/scripts/stop-profile.sh prod-home
 
 최초 배포 후에는 target 서버마다 `{base}/deploy.compose.env`가 남는다. 이 파일에 마지막 배포 이미지 태그(image tag)가 저장되므로 수동 start/stop 시 `GOODMONEYING_IMAGE_TAG`를 다시 입력하지 않는다.
 
+Runner에서 전체 profile을 제어할 때는 아래 명령을 쓴다.
+
 ```bash
 deploy/scripts/start-profile.sh prod-home
 deploy/scripts/stop-profile.sh prod-home
+```
+
+각 서버에 직접 들어가서 해당 서버의 서비스만 제어해야 하면 target-local 스크립트를 쓴다. 이 스크립트들은 배포 시 각 서버의 base directory로 복사된다.
+
+Mac Mini M4:
+
+```bash
+cd /Users/goodjoon/DATA/applications/goodmoneying
+./start.sh
+./stop.sh
+```
+
+APP SERVER 01:
+
+```bash
+cd /home/goodjoon/project/goodmoneying
+./start.sh
+./stop.sh
+./start-api.sh
+./stop-api.sh
+./start-worker.sh
+./stop-worker.sh
+```
+
+bmax-ubuntu:
+
+```bash
+cd /home/goodjoon/applications/goodmoneying
+./start.sh
+./stop.sh
 ```

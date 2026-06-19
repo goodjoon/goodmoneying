@@ -80,6 +80,16 @@ def test_prod_home_profile_has_required_files() -> None:
     assert (profile_dir / "target/infra/compose.yml").is_file()
     assert (profile_dir / "target/app/compose.yml").is_file()
     assert (profile_dir / "target/web/compose.yml").is_file()
+    assert (profile_dir / "target/infra/start.sh").is_file()
+    assert (profile_dir / "target/infra/stop.sh").is_file()
+    assert (profile_dir / "target/app/start.sh").is_file()
+    assert (profile_dir / "target/app/stop.sh").is_file()
+    assert (profile_dir / "target/app/start-api.sh").is_file()
+    assert (profile_dir / "target/app/stop-api.sh").is_file()
+    assert (profile_dir / "target/app/start-worker.sh").is_file()
+    assert (profile_dir / "target/app/stop-worker.sh").is_file()
+    assert (profile_dir / "target/web/start.sh").is_file()
+    assert (profile_dir / "target/web/stop.sh").is_file()
     assert (profile_dir / "README.md").is_file()
 
 
@@ -209,6 +219,38 @@ def test_prod_home_compose_uses_fixed_ghcr_image_names() -> None:
     )
 
 
+def test_prod_home_target_local_scripts_use_local_compose_env() -> None:
+    target_dir = ROOT / "deploy/profiles/prod-home/target"
+    role_scripts = {
+        "infra": ["start.sh", "stop.sh"],
+        "app": [
+            "start.sh",
+            "stop.sh",
+            "start-api.sh",
+            "stop-api.sh",
+            "start-worker.sh",
+            "stop-worker.sh",
+        ],
+        "web": ["start.sh", "stop.sh"],
+    }
+
+    for role, scripts in role_scripts.items():
+        for script in scripts:
+            path = target_dir / role / script
+            text = path.read_text()
+            assert os.access(path, os.X_OK)
+            assert "SCRIPT_DIR=" in text
+            assert "deploy.compose.env" in text
+            assert "docker compose --env-file" in text
+            assert "-f \"$COMPOSE_FILE\"" in text
+
+    assert '"$@"' in (target_dir / "app/start-api.sh").read_text()
+    assert "up -d api" in (target_dir / "app/start-api.sh").read_text()
+    assert "stop api" in (target_dir / "app/stop-api.sh").read_text()
+    assert "up -d worker" in (target_dir / "app/start-worker.sh").read_text()
+    assert "stop worker" in (target_dir / "app/stop-worker.sh").read_text()
+
+
 def test_deploy_script_rejects_unknown_profile() -> None:
     result = run_deploy_script("unknown", "release-abc1234")
 
@@ -295,6 +337,19 @@ def test_deploy_script_dry_run_prints_remote_commands() -> None:
         f"scp {ROOT}/deploy/profiles/prod-home/target/infra/compose.yml "
         "Mac-Mini-M4.local:/Users/goodjoon/DATA/applications/goodmoneying/"
         "compose.infra.yml"
+    ) in result.stdout
+    assert (
+        f"scp {ROOT}/deploy/profiles/prod-home/target/infra/start.sh "
+        "Mac-Mini-M4.local:/Users/goodjoon/DATA/applications/goodmoneying/"
+        "start.sh"
+    ) in result.stdout
+    assert (
+        f"scp {ROOT}/deploy/profiles/prod-home/target/app/start-api.sh "
+        "app-server01:/home/goodjoon/project/goodmoneying/start-api.sh"
+    ) in result.stdout
+    assert (
+        f"scp {ROOT}/deploy/profiles/prod-home/target/web/stop.sh "
+        "bmax-ubuntu:/home/goodjoon/applications/goodmoneying/stop.sh"
     ) in result.stdout
     assert "compose.infra.yml' pull" in result.stdout
     assert "compose.infra.yml' up -d" in result.stdout
