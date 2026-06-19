@@ -62,6 +62,9 @@ def test_prod_home_readme_documents_required_env_files() -> None:
 
     assert "GOODMONEYING_DATABASE_URL" in readme
     assert "GOODMONEYING_OPERATOR_TOKEN" in readme
+    assert "GOODMONEYING_INFRA_POSTGRES_DATA_DIR" in readme
+    assert "GOODMONEYING_APP_CONFIG_DIR" in readme
+    assert "stdout/stderr" in readme
     assert "CR_PAT" in readme
     assert "docker login ghcr.io" in readme
     assert "Tailscale" in readme
@@ -93,6 +96,51 @@ def test_prod_home_compose_uses_external_env_files() -> None:
     assert "/opt/goodmoneying/env/app.env" in app["api"]["env_file"]
     assert "/opt/goodmoneying/env/app.env" in app["worker"]["env_file"]
     assert "/opt/goodmoneying/env/web.env" in web["web"]["env_file"]
+
+
+def test_prod_home_hosts_env_defines_server_specific_data_and_config_paths() -> None:
+    hosts_env = (ROOT / "deploy/profiles/prod-home/hosts.env").read_text()
+
+    assert "GOODMONEYING_INFRA_POSTGRES_DATA_DIR=" in hosts_env
+    assert "GOODMONEYING_INFRA_CONFIG_DIR=" in hosts_env
+    assert "GOODMONEYING_APP_API_DATA_DIR=" in hosts_env
+    assert "GOODMONEYING_APP_WORKER_DATA_DIR=" in hosts_env
+    assert "GOODMONEYING_APP_CONFIG_DIR=" in hosts_env
+    assert "GOODMONEYING_WEB_NGINX_CACHE_DIR=" in hosts_env
+    assert "GOODMONEYING_WEB_CONFIG_DIR=" in hosts_env
+    assert "LOG_DIR=" not in hosts_env
+
+
+def test_prod_home_compose_mounts_data_cache_and_config_dirs_from_host_variables() -> None:
+    infra = services(load_compose("compose.infra.yml"))
+    app = services(load_compose("compose.app.yml"))
+    web = services(load_compose("compose.web.yml"))
+
+    assert "${GOODMONEYING_INFRA_POSTGRES_DATA_DIR}:/var/lib/postgresql/data" in infra[
+        "postgres"
+    ]["volumes"]
+    assert "${GOODMONEYING_APP_API_DATA_DIR}:/var/lib/goodmoneying/api" in app["api"][
+        "volumes"
+    ]
+    assert "${GOODMONEYING_APP_CONFIG_DIR}:/etc/goodmoneying:ro" in app["api"][
+        "volumes"
+    ]
+    assert "${GOODMONEYING_APP_WORKER_DATA_DIR}:/var/lib/goodmoneying/worker" in app[
+        "worker"
+    ]["volumes"]
+    assert "${GOODMONEYING_APP_CONFIG_DIR}:/etc/goodmoneying:ro" in app[
+        "worker"
+    ]["volumes"]
+    assert "${GOODMONEYING_WEB_NGINX_CACHE_DIR}:/var/cache/nginx" in web["web"][
+        "volumes"
+    ]
+    assert "${GOODMONEYING_WEB_CONFIG_DIR}:/etc/goodmoneying:ro" in web["web"][
+        "volumes"
+    ]
+    for compose_services in (infra, app, web):
+        for service in compose_services.values():
+            for volume in service.get("volumes", []):
+                assert "/var/log" not in volume
 
 
 def test_prod_home_compose_binds_ports_to_tailscale_ips() -> None:
@@ -153,12 +201,23 @@ def test_deploy_script_dry_run_prints_remote_commands() -> None:
 
     assert result.returncode == 0
     assert "ssh Mac-Mini-M4.local" in result.stdout
-    assert "docker compose --env-file '/opt/goodmoneying/env/infra.env'" in result.stdout
+    assert "deploy.hosts.env" in result.stdout
+    assert "docker compose --env-file '/opt/goodmoneying/deploy.hosts.env'" in result.stdout
     assert "ssh app-server01" in result.stdout
-    assert "docker compose --env-file '/opt/goodmoneying/env/app.env'" in result.stdout
     assert "ssh bmax-ubuntu" in result.stdout
-    assert "docker compose --env-file '/opt/goodmoneying/env/web.env'" in result.stdout
     assert 'ssh Mac-Mini-M4.local "mkdir -p \'/opt/goodmoneying\'"' in result.stdout
+    assert "mkdir -p '/opt/goodmoneying/infra/postgres-data'" in result.stdout
+    assert "mkdir -p '/opt/goodmoneying/infra/config'" in result.stdout
+    assert "mkdir -p '/opt/goodmoneying/app/api-data'" in result.stdout
+    assert "mkdir -p '/opt/goodmoneying/app/worker-data'" in result.stdout
+    assert "mkdir -p '/opt/goodmoneying/app/config'" in result.stdout
+    assert "mkdir -p '/opt/goodmoneying/web/nginx-cache'" in result.stdout
+    assert "mkdir -p '/opt/goodmoneying/web/config'" in result.stdout
+    assert "logs" not in result.stdout
+    assert (
+        f"scp {ROOT}/deploy/profiles/prod-home/hosts.env "
+        "Mac-Mini-M4.local:/opt/goodmoneying/deploy.hosts.env"
+    ) in result.stdout
     assert (
         f"scp {ROOT}/deploy/profiles/prod-home/compose.infra.yml "
         "Mac-Mini-M4.local:/opt/goodmoneying/compose.infra.yml"

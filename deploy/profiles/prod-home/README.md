@@ -10,6 +10,15 @@
 | APP SERVER 01 | application | api, worker |
 | bmax-ubuntu | web | web |
 
+## 배포 실행 흐름
+
+![prod-home 배포 실행 흐름](./prod-home-deploy-flow.drawio.svg)
+
+- `release` 브랜치 push 또는 수동 실행(`workflow_dispatch`)은 Mac Mini M4의 GitHub Actions runner에서 `.github/workflows/deploy.yml`을 실행한다.
+- workflow는 검증 후 `api`, `worker`, `web` 이미지를 private GHCR(GitHub Container Registry)에 `release-{short-sha}` 태그(tag)로 push한다.
+- runner에서 `deploy/scripts/deploy-profile.sh prod-home "${IMAGE_TAG}"`가 실행되고, `profile.env`와 `hosts.env`를 읽어 서버별 compose 파일을 복사한 뒤 원격 `docker compose pull`과 `up -d`를 실행한다.
+- 배포 후 runner에서 `deploy/scripts/healthcheck-profile.sh prod-home`이 API, web, PostgreSQL, worker 상태를 점검하고, 통과하면 운영 URL 대상으로 `npm run e2e`를 실행한다.
+
 ## 비밀값
 
 비밀값은 repo에 커밋하지 않는다. 각 서버의 `/opt/goodmoneying/env/` 아래에 둔다.
@@ -18,6 +27,24 @@
 - `/opt/goodmoneying/env/app.env`
 - `/opt/goodmoneying/env/web.env`
 - `/opt/goodmoneying/env/ghcr.env`
+
+## 서버별 host volume 경로와 설정 파일
+
+컨테이너의 데이터 디렉터리(data directory), 캐시(cache), 서버별 설정 디렉터리(configuration directory)는 host 경로에 bind mount한다. 애플리케이션 로그(application log)는 파일 mount가 아니라 stdout/stderr 컨테이너 로그(container log)로 남긴다. 서버별 host 경로는 [hosts.env](./hosts.env)에서 바꾼다.
+
+| 서버 | 설정 키 | 기본 host 경로 | 컨테이너 경로 |
+|---|---|---|---|
+| Mac Mini M4 | `GOODMONEYING_INFRA_POSTGRES_DATA_DIR` | `/opt/goodmoneying/infra/postgres-data` | `/var/lib/postgresql/data` |
+| Mac Mini M4 | `GOODMONEYING_INFRA_CONFIG_DIR` | `/opt/goodmoneying/infra/config` | 별도 서비스에서 필요 시 사용 |
+| APP SERVER 01 | `GOODMONEYING_APP_API_DATA_DIR` | `/opt/goodmoneying/app/api-data` | `/var/lib/goodmoneying/api` |
+| APP SERVER 01 | `GOODMONEYING_APP_WORKER_DATA_DIR` | `/opt/goodmoneying/app/worker-data` | `/var/lib/goodmoneying/worker` |
+| APP SERVER 01 | `GOODMONEYING_APP_CONFIG_DIR` | `/opt/goodmoneying/app/config` | `/etc/goodmoneying` |
+| bmax-ubuntu | `GOODMONEYING_WEB_NGINX_CACHE_DIR` | `/opt/goodmoneying/web/nginx-cache` | `/var/cache/nginx` |
+| bmax-ubuntu | `GOODMONEYING_WEB_CONFIG_DIR` | `/opt/goodmoneying/web/config` | `/etc/goodmoneying` |
+
+`deploy-profile.sh`는 배포 시 각 서버에 `/opt/goodmoneying/deploy.hosts.env`를 복사하고, `docker compose --env-file /opt/goodmoneying/deploy.hosts.env`로 compose 변수 치환을 수행한다.
+
+`application.yml`, `logback.yml`처럼 운영 서버에서 바뀔 수 있는 설정 파일은 이미지(image)에만 두지 않는다. 기본값은 이미지에 포함하되, 운영에서 바꾸는 파일은 host의 config 디렉터리에 두고 read-only mount로 컨테이너에 제공한다. 현재 goodmoneying 앱의 주요 운영 설정은 `/opt/goodmoneying/env/*.env`로 관리하며, 향후 파일 기반 설정을 읽는 런타임을 추가하면 `/etc/goodmoneying`을 읽도록 앱 실행 옵션을 연결한다.
 
 ## 서버별 env 파일
 
