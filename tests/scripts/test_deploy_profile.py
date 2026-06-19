@@ -411,10 +411,10 @@ def test_healthcheck_script_dry_run_prints_checks() -> None:
     assert result.returncode == 0
     assert (
         "curl -fsS --connect-timeout 5 --max-time 10 "
-        "http://app-server01:8000/health"
+        "http://100.115.38.59:8000/health"
     ) in result.stdout
     assert (
-        "curl -fsS --connect-timeout 5 --max-time 10 http://bmax-ubuntu:8080/"
+        "curl -fsS --connect-timeout 5 --max-time 10 http://100.68.208.102:8080/"
     ) in result.stdout
     assert "ssh -o BatchMode=yes -o ConnectTimeout=10" in result.stdout
     assert (
@@ -437,8 +437,8 @@ def test_healthcheck_script_dry_run_prints_checks_in_order() -> None:
     result = run_healthcheck_script("prod-home")
 
     assert result.returncode == 0
-    api_index = result.stdout.index("http://app-server01:8000/health")
-    web_index = result.stdout.index("http://bmax-ubuntu:8080/")
+    api_index = result.stdout.index("http://100.115.38.59:8000/health")
+    web_index = result.stdout.index("http://100.68.208.102:8080/")
     postgres_index = result.stdout.index("docker exec goodmoneying-postgres")
     worker_index = result.stdout.index("goodmoneying-worker")
     assert api_index < web_index < postgres_index < worker_index

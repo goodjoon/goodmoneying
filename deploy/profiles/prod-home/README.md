@@ -83,8 +83,8 @@ GOODMONEYING_LIVE_UPBIT=1
 ### bmax-ubuntu: `/home/goodjoon/applications/goodmoneying/env/web.env`
 
 ```bash
-GOODMONEYING_WEB_INTERNAL_URL=http://bmax-ubuntu:8080
-GOODMONEYING_API_INTERNAL_URL=http://app-server01:8000
+GOODMONEYING_WEB_INTERNAL_URL=http://100.68.208.102:8080
+GOODMONEYING_API_INTERNAL_URL=http://100.115.38.59:8000
 GOODMONEYING_OPERATOR_TOKEN=prod-home-example-operator-token-rotate
 ```
 
