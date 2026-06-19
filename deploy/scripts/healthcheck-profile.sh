@@ -28,12 +28,14 @@ api_health_url="$GOODMONEYING_API_INTERNAL_URL/health"
 web_health_url="$GOODMONEYING_WEB_INTERNAL_URL/"
 postgres_check='pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 worker_check_template="{{.State.Running}}"
+postgres_remote_command="docker exec goodmoneying-postgres sh -c '$postgres_check'"
+worker_remote_command="docker inspect -f '$worker_check_template' goodmoneying-worker"
 
 commands=(
   "curl ${curl_args[*]} $api_health_url"
   "curl ${curl_args[*]} $web_health_url"
-  "ssh ${ssh_args[*]} $GOODMONEYING_INFRA_HOST docker exec goodmoneying-postgres sh -c '$postgres_check'"
-  "ssh ${ssh_args[*]} $GOODMONEYING_APP_HOST docker inspect -f '$worker_check_template' goodmoneying-worker"
+  "ssh ${ssh_args[*]} $GOODMONEYING_INFRA_HOST $postgres_remote_command"
+  "ssh ${ssh_args[*]} $GOODMONEYING_APP_HOST $worker_remote_command"
 )
 
 if [[ "$DRY_RUN" == "1" ]]; then
@@ -45,12 +47,14 @@ curl "${curl_args[@]}" "$api_health_url" >/dev/null
 curl "${curl_args[@]}" "$web_health_url" >/dev/null
 ssh "${ssh_args[@]}" \
   "$GOODMONEYING_INFRA_HOST" \
-  docker exec goodmoneying-postgres sh -c "$postgres_check"
+  "$postgres_remote_command"
 worker_running="$(
   ssh "${ssh_args[@]}" \
     "$GOODMONEYING_APP_HOST" \
-    docker inspect -f "$worker_check_template" goodmoneying-worker
+    "$worker_remote_command"
 )"
+worker_running="${worker_running//$'\r'/}"
+worker_running="${worker_running//$'\n'/}"
 if [[ "$worker_running" != "true" ]]; then
   fail "worker 컨테이너가 실행 중이 아닙니다."
 fi

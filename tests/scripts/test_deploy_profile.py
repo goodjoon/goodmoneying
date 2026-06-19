@@ -164,8 +164,11 @@ def test_healthcheck_script_dry_run_prints_checks() -> None:
         "curl -fsS --connect-timeout 5 --max-time 10 http://bmax-ubuntu:8080/"
     ) in result.stdout
     assert "ssh -o BatchMode=yes -o ConnectTimeout=10" in result.stdout
-    assert "docker exec goodmoneying-postgres" in result.stdout
-    assert 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' in result.stdout
+    assert (
+        "ssh -o BatchMode=yes -o ConnectTimeout=10 Mac-Mini-M4.local "
+        "docker exec goodmoneying-postgres sh -c "
+        '\'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"\''
+    ) in result.stdout.splitlines()
     assert "docker inspect -f '{{.State.Running}}' goodmoneying-worker" in result.stdout
 
 
