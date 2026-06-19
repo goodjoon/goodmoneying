@@ -92,7 +92,7 @@ jobs:
 
       - name: Build and push web
         run: |
-          docker build -f apps/web/Dockerfile -t ghcr.io/${IMAGE_NAMESPACE}/goodmoneying-web:${IMAGE_TAG} .
+          docker build --build-arg VITE_API_BASE_URL=http://app-server01:8000 -f apps/web/Dockerfile -t ghcr.io/${IMAGE_NAMESPACE}/goodmoneying-web:${IMAGE_TAG} .
           docker push ghcr.io/${IMAGE_NAMESPACE}/goodmoneying-web:${IMAGE_TAG}
 
       - name: Deploy profile

@@ -57,6 +57,23 @@ def test_prod_home_profile_has_required_files() -> None:
     assert (profile_dir / "README.md").is_file()
 
 
+def test_prod_home_readme_documents_required_env_files() -> None:
+    readme = (ROOT / "deploy/profiles/prod-home/README.md").read_text()
+
+    assert "GOODMONEYING_DATABASE_URL" in readme
+    assert "GOODMONEYING_OPERATOR_TOKEN" in readme
+    assert "CR_PAT" in readme
+    assert "docker login ghcr.io" in readme
+    assert "Tailscale" in readme
+
+
+def test_web_dockerfile_accepts_api_base_build_arg() -> None:
+    dockerfile = (ROOT / "apps/web/Dockerfile").read_text()
+
+    assert "ARG VITE_API_BASE_URL=http://127.0.0.1:8000" in dockerfile
+    assert "ENV VITE_API_BASE_URL=$VITE_API_BASE_URL" in dockerfile
+
+
 def test_prod_home_compose_files_assign_expected_services() -> None:
     infra = load_compose("compose.infra.yml")
     app = load_compose("compose.app.yml")

@@ -110,6 +110,7 @@ def test_deploy_workflow_pushes_ghcr_and_runs_profile_scripts() -> None:
     assert "ghcr.io/${IMAGE_NAMESPACE}/goodmoneying-api:${IMAGE_TAG}" in workflow_text
     assert "ghcr.io/${IMAGE_NAMESPACE}/goodmoneying-worker:${IMAGE_TAG}" in workflow_text
     assert "ghcr.io/${IMAGE_NAMESPACE}/goodmoneying-web:${IMAGE_TAG}" in workflow_text
+    assert "docker build --build-arg VITE_API_BASE_URL=http://app-server01:8000" in workflow_text
 
 
 def test_deploy_workflow_runs_e2e_against_deployed_urls() -> None:
