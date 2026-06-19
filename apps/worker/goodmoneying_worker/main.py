@@ -24,12 +24,20 @@ def run_incremental_once(worker: UpbitCollectionWorker) -> int:
     return written
 
 
+def non_negative_float(value: str) -> float:
+    parsed = float(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("0 이상의 값을 입력해야 합니다.")
+    return parsed
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="goodmoneying M1 수집 워커")
     parser.add_argument("--database", default=":memory:")
-    parser.add_argument("--once", action="store_true")
-    parser.add_argument("--loop", action="store_true")
-    parser.add_argument("--interval-seconds", type=float, default=60.0)
+    incremental_mode = parser.add_mutually_exclusive_group()
+    incremental_mode.add_argument("--once", action="store_true")
+    incremental_mode.add_argument("--loop", action="store_true")
+    parser.add_argument("--interval-seconds", type=non_negative_float, default=60.0)
     parser.add_argument("--run-backfill-once", action="store_true")
     parser.add_argument("--run-backfill-loop", action="store_true")
     parser.add_argument("--backfill-poll-seconds", type=float, default=5.0)
