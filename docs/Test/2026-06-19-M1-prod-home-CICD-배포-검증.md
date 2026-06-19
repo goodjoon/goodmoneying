@@ -38,7 +38,7 @@ GitHub Actions `Deploy prod-home` run `27821382094`는 Mac Mini M4 organization 
 운영 URL E2E는 두 가지 보강이 필요했다.
 
 - 운영 API 쓰기 요청은 `GOODMONEYING_OPERATOR_TOKEN`과 동일한 토큰을 써야 하므로 GitHub Actions가 APP SERVER 01의 `app.env`에서 값을 읽고 `E2E_OPERATOR_TOKEN`으로 마스킹(masking)해 주입한다.
-- 운영 DB의 실시간 시장 순위와 API 응답 시간이 로컬 fixture와 다르므로 E2E는 특정 코인(BTC) 고정 대신 실제 표시 행 기준으로 탐색하고, 첫 렌더링 대기 시간을 늘린다.
+- 운영 DB의 실시간 시장 순위, 표시 가능한 시장 수, API 응답 시간이 로컬 fixture와 다르므로 E2E는 특정 코인(BTC)이나 정확한 행 수 고정 대신 실제 표시 행 기준으로 탐색하고, 첫 렌더링 대기 시간을 늘린다.
 - Mac Mini M4 runner의 Playwright 브라우저 캐시는 항상 존재한다고 볼 수 없으므로 배포 워크플로우에서 `npx playwright install chromium`을 실행한다.
 
 ## Docker 빌드 검증 공백
