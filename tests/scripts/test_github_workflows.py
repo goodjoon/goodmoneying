@@ -81,7 +81,7 @@ def test_deploy_workflow_uses_self_hosted_runner_and_prod_home_concurrency() -> 
     assert "mac-mini-m4" in cast(list[str], job["runs-on"])
     assert job["environment"] == "prod"
     assert job["timeout-minutes"] == 60
-    assert concurrency["group"] == "deploy-prod-home-v2"
+    assert concurrency["group"] == "deploy-prod-home-v3"
     assert concurrency["cancel-in-progress"] is True
 
 

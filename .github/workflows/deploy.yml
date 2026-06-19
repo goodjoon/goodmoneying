@@ -14,7 +14,7 @@ on:
           - prod-home
 
 concurrency:
-  group: deploy-prod-home-v2
+  group: deploy-prod-home-v3
   cancel-in-progress: true
 
 permissions:
