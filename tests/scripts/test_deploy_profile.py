@@ -358,7 +358,9 @@ def test_deploy_script_dry_run_prints_remote_commands() -> None:
         "'/Users/goodjoon/DATA/applications/goodmoneying/deploy.compose.env'\""
     ) in result.stdout
     assert (
-        "ln -sf /Applications/Docker.app/Contents/Resources/cli-plugins/"
+        "rm -f '/Users/goodjoon/DATA/applications/goodmoneying/.docker/"
+        "cli-plugins/docker-compose' && ln -s "
+        "/Applications/Docker.app/Contents/Resources/cli-plugins/"
         "docker-compose "
         "'/Users/goodjoon/DATA/applications/goodmoneying/.docker/"
         "cli-plugins/docker-compose'"
