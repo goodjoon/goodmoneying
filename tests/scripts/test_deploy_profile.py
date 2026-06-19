@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any, cast
 
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -21,6 +24,15 @@ def run_deploy_script(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def load_compose(name: str) -> Mapping[str, Any]:
+    path = ROOT / f"deploy/profiles/prod-home/{name}"
+    return cast("Mapping[str, Any]", yaml.safe_load(path.read_text()))
+
+
+def services(compose: Mapping[str, Any]) -> Mapping[str, Any]:
+    return cast("Mapping[str, Any]", compose["services"])
+
+
 def test_prod_home_profile_has_required_files() -> None:
     profile_dir = ROOT / "deploy/profiles/prod-home"
 
@@ -30,6 +42,25 @@ def test_prod_home_profile_has_required_files() -> None:
     assert (profile_dir / "compose.app.yml").is_file()
     assert (profile_dir / "compose.web.yml").is_file()
     assert (profile_dir / "README.md").is_file()
+
+
+def test_prod_home_compose_files_assign_expected_services() -> None:
+    infra = load_compose("compose.infra.yml")
+    app = load_compose("compose.app.yml")
+    web = load_compose("compose.web.yml")
+
+    assert set(services(infra)) == {"postgres"}
+    assert set(services(app)) == {"api", "worker"}
+    assert set(services(web)) == {"web"}
+
+
+def test_prod_home_compose_uses_external_env_files() -> None:
+    app = services(load_compose("compose.app.yml"))
+    web = services(load_compose("compose.web.yml"))
+
+    assert "/opt/goodmoneying/env/app.env" in app["api"]["env_file"]
+    assert "/opt/goodmoneying/env/app.env" in app["worker"]["env_file"]
+    assert "/opt/goodmoneying/env/web.env" in web["web"]["env_file"]
 
 
 def test_deploy_script_rejects_unknown_profile() -> None:
